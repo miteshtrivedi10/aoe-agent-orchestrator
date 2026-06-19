@@ -59,21 +59,21 @@ oauth_config:
       - mpim:read
       - users:read
 settings:
-  event_subscriptions:
-    bot_events:
-      - message.channels
-      - message.groups
-      - message.im
-      - message.mpim
   interactivity:
     is_enabled: true
 ```
 
-3. After creation, go to **Settings** → **Socket Mode** → toggle **On** (do this BEFORE event subscriptions)
-4. Go to **OAuth & Permissions** → **Install to Workspace** → copy the **Bot Token** (`xoxb-...`)
-5. **Basic Information** → **App-Level Tokens** → **Generate Token** with `connections:write` scope → copy the token (`xapp-...`)
+3. After creation:
+   - **Settings → Socket Mode** → toggle **On**
+   - **Event Subscriptions** → toggle **On** → add these **bot events**:
+     - `message.channels`
+     - `message.groups`
+     - `message.im`
+     - `message.mpim`
+4. **OAuth & Permissions** → **Install to Workspace** → copy **Bot Token** (`xoxb-...`)
+5. **Basic Information** → **App-Level Tokens** → **Generate Token** with `connections:write` scope → copy token (`xapp-...`)
 
-The event subscriptions are already in the manifest — the `socket_mode` toggle unlocks them without needing a public URL.
+Socket Mode must be On before event subscriptions accept the bot events without a public URL.
 
 Set these secrets:
 
