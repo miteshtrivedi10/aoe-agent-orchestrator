@@ -24,8 +24,9 @@ RUN apt-get update && \
 RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup
 
 # Pre-install messaging deps (slack-bolt, slack-sdk, etc.)
-# The [all] extra no longer includes slack as of v0.16.0
-RUN /root/.hermes/hermes-agent/venv/bin/pip install --no-cache-dir "hermes-agent[slack]"
+# The [all] extra no longer includes slack as of v0.16.0.
+# Running as root — installer puts code at /usr/local/lib/hermes-agent
+RUN /usr/local/lib/hermes-agent/venv/bin/pip install --no-cache-dir "hermes-agent[slack]"
 
 ENV PATH="/root/.local/bin:${PATH}"
 ENV HERMES_HOME="/root/.hermes"
