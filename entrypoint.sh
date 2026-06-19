@@ -19,7 +19,7 @@ for var in $(compgen -e); do
     BLUEBUBBLES_*|TEAMS_*|LINE_*|EMAIL_*|GATEWAY_*|SMS_*|\
     HOME_ASSISTANT_*|NTFY_*|YUANBAO_*|\
     N8N_*|LINEAR_*|\
-    MODEL|LM_*|COPILOT_*|CODEBOX_*)
+    MODEL|LM_*|COPILOT_*|CODEBOX_*|OWL_*)
       val="${!var}"
       if [ -n "$val" ]; then
         echo "$var=$val" >> "$ENV_FILE"
@@ -32,7 +32,7 @@ echo "[entrypoint] Wrote $(wc -l < "$ENV_FILE") vars"
 echo "[entrypoint] .env names: $(cut -d= -f1 "$ENV_FILE" | tr '\n' ' ')"
 
 # Write model to config.yaml
-MODEL="${MODEL:-openrouter/nousresearch/hermes-3-llama-3.1-405b:free}"
+MODEL="${MODEL:-openrouter/owl-alpha}"
 echo "model: ${MODEL}" > "$HERMES_HOME/config.yaml"
 echo "[entrypoint] model: ${MODEL}"
 
