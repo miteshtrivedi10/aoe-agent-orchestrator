@@ -34,10 +34,18 @@ for var in $(compgen -e); do
 done
 
 echo "[entrypoint] Wrote $(wc -l < "$ENV_FILE") vars to $ENV_FILE"
+echo "[entrypoint] .env var names: $(cut -d= -f1 "$ENV_FILE" | tr '\n' ' ')"
 
-# If MODEL env var is set, configure the model
+# Configure default model
 if [ -n "${MODEL:-}" ]; then
   hermes config set model "$MODEL" 2>/dev/null || true
+fi
+
+# Explicitly enable Slack in config.yaml if SLACK tokens are present.
+if [ -n "${SLACK_BOT_TOKEN:-}" ]; then
+  hermes config set platforms.slack.bot_token "\$SLACK_BOT_TOKEN" 2>/dev/null || true
+  hermes config set platforms.slack.app_token "\$SLACK_APP_TOKEN" 2>/dev/null || true
+  hermes config set platform_toolsets.slack '["hermes-slack"]' 2>/dev/null || true
 fi
 
 echo "[entrypoint] Starting Hermes Gateway..."
