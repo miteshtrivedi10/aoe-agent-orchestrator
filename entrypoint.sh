@@ -5,12 +5,7 @@ HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 mkdir -p "$HERMES_HOME"
 
 # Write all relevant env vars to .env so hermes gateway picks them up.
-# This catches provider keys, bot tokens, gateway config, etc.
-# We only write vars likely relevant to Hermes (common prefixes).
 ENV_FILE="$HERMES_HOME/.env"
-touch "$ENV_FILE"
-
-# Clear stale entries (rewrite from scratch)
 > "$ENV_FILE"
 
 for var in $(compgen -e); do
@@ -33,24 +28,15 @@ for var in $(compgen -e); do
   esac
 done
 
-echo "[entrypoint] Wrote $(wc -l < "$ENV_FILE") vars to $ENV_FILE"
-echo "[entrypoint] .env var names: $(cut -d= -f1 "$ENV_FILE" | tr '\n' ' ')"
+echo "[entrypoint] Wrote $(wc -l < "$ENV_FILE") vars"
+echo "[entrypoint] .env names: $(cut -d= -f1 "$ENV_FILE" | tr '\n' ' ')"
 
-# Write default model to config.yaml (direct write — CLI may not support top-level model key)
+# Write model to config.yaml
 if [ -n "${MODEL:-}" ]; then
-  echo "model: ${MODEL}" >> "$HERMES_HOME/config.yaml"
+  echo "model: ${MODEL}" > "$HERMES_HOME/config.yaml"
+  echo "[entrypoint] model: ${MODEL}"
 fi
 
-# Configure Slack in config.yaml (uses env var references, not plaintext)
-if [ -n "${SLACK_BOT_TOKEN:-}" ]; then
-  hermes config set platforms.slack.bot_token "\$SLACK_BOT_TOKEN"
-  hermes config set platforms.slack.app_token "\$SLACK_APP_TOKEN"
-  hermes config set platform_toolsets.slack '["hermes-slack"]'
-fi
-
-# Diagnostic: show config.yaml (mask secrets)
-echo "[entrypoint] config.yaml model: $(grep '^model:' "$HERMES_HOME/config.yaml" 2>/dev/null || echo 'NOT SET')"
-
-echo "[entrypoint] Starting Hermes Gateway (verbose)..."
+echo "[entrypoint] Starting Hermes Gateway..."
 export PYTHONUNBUFFERED=1
 exec hermes gateway run -vv 2>&1
