@@ -39,10 +39,10 @@ Set these as **HF Space Secrets** (Settings → Repository Secrets):
 
 ```yaml
 display_information:
-  name: Hermes
+  name: Personal-Bot
 features:
   bot_user:
-    display_name: Hermes
+    display_name: Personal-Bot
     always_online: true
 oauth_config:
   scopes:
