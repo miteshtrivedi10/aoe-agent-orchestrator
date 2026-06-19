@@ -23,7 +23,9 @@ Set these as **HF Space Secrets** (Settings → Repository Secrets):
 
 | Secret | Description |
 |--------|-------------|
-| `OPENROUTER_API_KEY` | OpenRouter API key (recommended, 200+ models) |
+| `OPENCODE_ZEN_API_KEY` | **OpenCode Zen** — pay-as-you-go curated models |
+| `OPENCODE_GO_API_KEY` | **OpenCode Go** — $10/mo subscription for open models |
+| `OPENROUTER_API_KEY` | OpenRouter API key (200+ models) |
 | `ANTHROPIC_API_KEY` | Anthropic/Claude API key |
 | `OPENAI_API_KEY` | OpenAI API key |
 | `DEEPSEEK_API_KEY` | DeepSeek API key |
