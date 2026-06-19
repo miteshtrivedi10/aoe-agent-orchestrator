@@ -104,17 +104,9 @@ done
 
 echo "[entrypoint] Wrote $(wc -l < "$ENV_FILE") vars"
 
-# Configure model
-if [ -n "${MODEL:-}" ]; then
-  hermes config set model "$MODEL" 2>/dev/null || true
-fi
-
-# Explicitly enable Slack in config.yaml
-if [ -n "${SLACK_BOT_TOKEN:-}" ]; then
-  hermes config set platforms.slack.bot_token "\$SLACK_BOT_TOKEN" 2>/dev/null || true
-  hermes config set platforms.slack.app_token "\$SLACK_APP_TOKEN" 2>/dev/null || true
-  hermes config set platform_toolsets.slack '["hermes-slack"]' 2>/dev/null || true
-fi
+# Write model to config.yaml
+MODEL="${MODEL:-openrouter/nousresearch/hermes-3-llama-3.1-405b:free}"
+echo "model: ${MODEL}" > "$HERMES_HOME/config.yaml"
 
 echo "[entrypoint] Starting Hermes Gateway..."
 export PYTHONUNBUFFERED=1

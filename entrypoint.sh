@@ -32,10 +32,9 @@ echo "[entrypoint] Wrote $(wc -l < "$ENV_FILE") vars"
 echo "[entrypoint] .env names: $(cut -d= -f1 "$ENV_FILE" | tr '\n' ' ')"
 
 # Write model to config.yaml
-if [ -n "${MODEL:-}" ]; then
-  echo "model: ${MODEL}" > "$HERMES_HOME/config.yaml"
-  echo "[entrypoint] model: ${MODEL}"
-fi
+MODEL="${MODEL:-openrouter/nousresearch/hermes-3-llama-3.1-405b:free}"
+echo "model: ${MODEL}" > "$HERMES_HOME/config.yaml"
+echo "[entrypoint] model: ${MODEL}"
 
 echo "[entrypoint] Starting Hermes Gateway..."
 export PYTHONUNBUFFERED=1
