@@ -36,6 +36,14 @@ MODEL="${MODEL:-openrouter/owl-alpha}"
 echo "model: ${MODEL}" > "$HERMES_HOME/config.yaml"
 echo "[entrypoint] model: ${MODEL}"
 
+# Write SOUL.md persona if not already present
+if [ ! -f "$HERMES_HOME/SOUL.md" ]; then
+  cat > "$HERMES_HOME/SOUL.md" << 'SOULEOF'
+You are Tuxedo, a personal AI assistant. You are helpful with coding, research, writing, analysis, and a bunch of other tasks. Be friendly and direct.
+SOULEOF
+  echo "[entrypoint] Created SOUL.md"
+fi
+
 echo "[entrypoint] Starting Hermes Gateway..."
 export PYTHONUNBUFFERED=1
 exec hermes gateway run -vv 2>&1
