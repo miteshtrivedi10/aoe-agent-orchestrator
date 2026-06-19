@@ -69,9 +69,11 @@ settings:
     is_enabled: true
 ```
 
-3. After creation, go to **Settings** → **Socket Mode** → toggle **On**
-4. **Install to Workspace** → copy the **Bot Token** (`xoxb-...`)
+3. After creation, go to **Settings** → **Socket Mode** → toggle **On** (do this BEFORE event subscriptions)
+4. Go to **OAuth & Permissions** → **Install to Workspace** → copy the **Bot Token** (`xoxb-...`)
 5. **Basic Information** → **App-Level Tokens** → **Generate Token** with `connections:write` scope → copy the token (`xapp-...`)
+
+The event subscriptions are already in the manifest — the `socket_mode` toggle unlocks them without needing a public URL.
 
 Set these secrets:
 
