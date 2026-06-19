@@ -80,15 +80,24 @@ Set these secrets:
 |--------|-------------|
 | `SLACK_BOT_TOKEN` | Bot token (`xoxb-...`) |
 | `SLACK_APP_TOKEN` | App-level token (`xapp-...`, required for Socket Mode) |
-| `SLACK_ALLOWED_USERS` | Your Slack member ID (right-click profile → **Copy member ID**) |
-| `GATEWAY_ALLOW_ALL_USERS` | Set to `true` to allow any workspace user |
+| `SLACK_ALLOWED_USERS` | Your Slack member ID (for initial access). Others can pair via DM |
+| `GATEWAY_ALLOW_ALL_USERS` | Set to `true` to allow any workspace user (use with caution) |
+
+### Adding other users
+
+Once the gateway is running, anyone in your Slack workspace can DM the bot to get a **one-time pairing code**. You approve them with:
+
+```
+hermes pairing approve slack <CODE>
+```
+
+Codes expire after 1 hour. No need to collect everyone's user ID.
 
 ### Optional
 
 | Secret | Description |
 |--------|-------------|
-| `MODEL` | Default model name (e.g. `anthropic/claude-sonnet-4-20250514`) |
-| `GATEWAY_ALLOW_ALL_USERS` | `true` to allow all users (use with caution) |
+| `MODEL` | Default model name (e.g. `openai/gpt-4o`) |
 | `GATEWAY_ALLOWED_USERS` | Global allowlist across all platforms |
 
 ## Docs
