@@ -48,6 +48,6 @@ if [ -n "${SLACK_BOT_TOKEN:-}" ]; then
   hermes config set platform_toolsets.slack '["hermes-slack"]' 2>/dev/null || true
 fi
 
-echo "[entrypoint] Starting Hermes Gateway..."
-
-exec hermes gateway
+echo "[entrypoint] Starting Hermes Gateway (verbose)..."
+export PYTHONUNBUFFERED=1
+exec hermes gateway run -vv 2>&1
