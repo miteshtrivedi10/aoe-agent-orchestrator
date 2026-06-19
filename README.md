@@ -32,18 +32,56 @@ Set these as **HF Space Secrets** (Settings → Repository Secrets):
 | `GOOGLE_API_KEY` | Google AI Studio / Gemini API key |
 | `HF_TOKEN` | Hugging Face token (for open models via HF router) |
 
-### Recommended: Messaging platform
+### Slack Setup
 
-Pick at least one:
+1. Go to https://api.slack.com/apps → **Create New App** → **From an app manifest**
+2. Choose your workspace, paste this manifest, then **Create**:
+
+```yaml
+display_information:
+  name: Hermes
+features:
+  bot_user:
+    display_name: Hermes
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - channels:history
+      - channels:read
+      - chat:write
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - im:write
+      - mpim:history
+      - mpim:read
+      - users:read
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+  interactivity:
+    is_enabled: true
+  socket_mode:
+    enabled: true
+```
+
+3. **Install to Workspace** → copy the **Bot Token** (`xoxb-...`)
+4. **Basic Information** → **App-Level Tokens** → **Generate Token** with `connections:write` scope → copy the token (`xapp-...`)
+
+Set these secrets:
 
 | Secret | Description |
 |--------|-------------|
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather |
-| `TELEGRAM_ALLOWED_USERS` | Comma-separated Telegram user IDs (restrict access) |
-| `DISCORD_BOT_TOKEN` | Discord bot token |
-| `DISCORD_ALLOWED_USERS` | Comma-separated Discord user IDs |
-| `SLACK_BOT_TOKEN` | Slack bot token |
-| `SLACK_APP_TOKEN` | Slack app token |
+| `SLACK_BOT_TOKEN` | Bot token (`xoxb-...`) |
+| `SLACK_APP_TOKEN` | App-level token (`xapp-...`, required for Socket Mode) |
+| `SLACK_ALLOWED_USERS` | Your Slack member ID (right-click profile → **Copy member ID**) |
+| `GATEWAY_ALLOW_ALL_USERS` | Set to `true` to allow any workspace user |
 
 ### Optional
 
