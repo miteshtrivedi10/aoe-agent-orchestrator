@@ -6,13 +6,16 @@ LABEL org.opencontainers.image.description="Hermes Agent — the self-improving 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# Install system deps: git is the only prerequisite for the installer;
-# ca-certificates + curl are needed for the download.
+# Install system deps needed by the Hermes installer:
+#   git        — required
+#   xz-utils   — needed to extract node-v22*.tar.xz
+#   bzip2      — some tool archives use bz2
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    git && \
+    git \
+    xz-utils && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /var/cache/apt/*
 
