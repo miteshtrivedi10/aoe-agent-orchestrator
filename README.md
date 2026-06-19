@@ -67,12 +67,11 @@ settings:
       - message.mpim
   interactivity:
     is_enabled: true
-  socket_mode:
-    enabled: true
 ```
 
-3. **Install to Workspace** → copy the **Bot Token** (`xoxb-...`)
-4. **Basic Information** → **App-Level Tokens** → **Generate Token** with `connections:write` scope → copy the token (`xapp-...`)
+3. After creation, go to **Settings** → **Socket Mode** → toggle **On**
+4. **Install to Workspace** → copy the **Bot Token** (`xoxb-...`)
+5. **Basic Information** → **App-Level Tokens** → **Generate Token** with `connections:write` scope → copy the token (`xapp-...`)
 
 Set these secrets:
 
