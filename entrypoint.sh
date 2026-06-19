@@ -24,7 +24,7 @@ for var in $(compgen -e); do
     BLUEBUBBLES_*|TEAMS_*|LINE_*|EMAIL_*|GATEWAY_*|SMS_*|\
     HOME_ASSISTANT_*|NTFY_*|YUANBAO_*|\
     N8N_*|LINEAR_*|\
-    LM_*|COPILOT_*|CODEBOX_*)
+    MODEL|LM_*|COPILOT_*|CODEBOX_*)
       val="${!var}"
       if [ -n "$val" ]; then
         echo "$var=$val" >> "$ENV_FILE"
@@ -36,17 +36,20 @@ done
 echo "[entrypoint] Wrote $(wc -l < "$ENV_FILE") vars to $ENV_FILE"
 echo "[entrypoint] .env var names: $(cut -d= -f1 "$ENV_FILE" | tr '\n' ' ')"
 
-# Configure default model
+# Write default model to config.yaml (direct write — CLI may not support top-level model key)
 if [ -n "${MODEL:-}" ]; then
-  hermes config set model "$MODEL" 2>/dev/null || true
+  echo "model: ${MODEL}" >> "$HERMES_HOME/config.yaml"
 fi
 
-# Explicitly enable Slack in config.yaml if SLACK tokens are present.
+# Configure Slack in config.yaml (uses env var references, not plaintext)
 if [ -n "${SLACK_BOT_TOKEN:-}" ]; then
-  hermes config set platforms.slack.bot_token "\$SLACK_BOT_TOKEN" 2>/dev/null || true
-  hermes config set platforms.slack.app_token "\$SLACK_APP_TOKEN" 2>/dev/null || true
-  hermes config set platform_toolsets.slack '["hermes-slack"]' 2>/dev/null || true
+  hermes config set platforms.slack.bot_token "\$SLACK_BOT_TOKEN"
+  hermes config set platforms.slack.app_token "\$SLACK_APP_TOKEN"
+  hermes config set platform_toolsets.slack '["hermes-slack"]'
 fi
+
+# Diagnostic: show config.yaml (mask secrets)
+echo "[entrypoint] config.yaml model: $(grep '^model:' "$HERMES_HOME/config.yaml" 2>/dev/null || echo 'NOT SET')"
 
 echo "[entrypoint] Starting Hermes Gateway (verbose)..."
 export PYTHONUNBUFFERED=1
