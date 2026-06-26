@@ -1,4 +1,4 @@
-name: Build and Deploy to HF Spaces
+name: Build and Push to GHCR
 
 on:
   push:
@@ -30,24 +30,4 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
 
-      - name: Deploy minimal files to HF Spaces
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          git clone https://miteshtrivedi10:${HF_TOKEN}@huggingface.co/spaces/miteshtrivedi10/aoe-agent-orchestrator hf-deploy
-          cd hf-deploy
 
-          git config user.name "Deploy Bot"
-          git config user.email "bot@localhost"
-
-          # Remove all tracked files except README.md
-          git ls-files | grep -v '^README.md$' | xargs -r git rm --ignore-unmatch
-
-          # Write minimal Dockerfile
-          cat > Dockerfile << 'EOF'
-          FROM ghcr.io/miteshtrivedi10/aoe-agent-orchestrator:latest
-          EOF
-
-          git add Dockerfile
-          git commit -m "deploy: update to latest image [skip ci]"
-          git push
