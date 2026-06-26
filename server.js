@@ -189,8 +189,8 @@ async function startKiloSession(workDir, label) {
     }
   });
 
-  // Kilo registers with Gateway automatically via KILO_REMOTE=1 + daemon relay.
-  // Just wait for initial render, then send the first prompt.
+  // Kilo registers with Gateway via KILO_REMOTE=1 + daemon relay + remote_control config.
+  // remote_control: true is set in config.json at startup, auto-enabling Cloud Dashboard access.
   log(`_start_kilo_session ${logPrefix(label)} waiting for Kilo to initialize...`);
   await sleep(8000);
 
@@ -377,14 +377,48 @@ async function runDeviceAuth() {
       }
       await sleep(3000);
 
+      // Verify daemon is running
+      try {
+        const ds = execFileSync("kilo", ["daemon", "status", "--json"], {
+          encoding: "utf8", timeout: 5000,
+        });
+        log(`_run_device_auth daemon status: ${ds.trim().slice(0, 200)}`);
+      } catch (e) {
+        log(`_run_device_auth daemon status check failed: ${e.message}`);
+      }
+
+      // Verify Kilo CLI is authenticated (reads auth.json)
+      await sleep(2000);
+      try {
+        const profile = execFileSync("kilo", ["profile", "--json"], {
+          encoding: "utf8", timeout: 10000,
+        });
+        log(`_run_device_auth profile: ${profile.trim().slice(0, 300)}`);
+      } catch (e) {
+        log(`_run_device_auth profile check failed: ${e.message}`);
+      }
+
       try {
         const remoteLog = fs.openSync("/data/kilo/remote.log", "a");
-        spawn("kilo", ["remote"], {
+        const remoteProc = spawn("kilo", ["remote"], {
           stdio: ["ignore", remoteLog, remoteLog],
           env: { ...process.env, KILO_REMOTE: "1" },
         }).unref();
         log("_run_device_auth kilo remote started in background");
         DEVICE_AUTH.message = "Login successful! Gateway relay enabled.";
+
+        // Check remote.log after a moment for connection evidence
+        setTimeout(() => {
+          try {
+            const rl = fs.readFileSync("/data/kilo/remote.log", "utf8");
+            const relevant = rl.split("\n").filter(l => /error|fail|connected|relay|gateway|auth/i.test(l));
+            if (relevant.length > 0) {
+              log(`_run_device_auth remote.log signals: ${relevant.slice(-5).join(" | ").slice(0, 300)}`);
+            } else {
+              log("_run_device_auth remote.log: no Gateway connection signals yet");
+            }
+          } catch (_) {}
+        }, 5000);
       } catch (e) {
         log(`_run_device_auth kilo remote failed: ${e.message}`);
       }
@@ -436,6 +470,61 @@ app.get("/api/status", (_req, res) => {
     if (st.size > 10) result.auth_exists = true;
   } catch (_) {}
   res.json(result);
+});
+
+app.get("/api/logs/daemon", (_req, res) => {
+  try {
+    const log = fs.readFileSync("/data/kilo/daemon.log", "utf8").slice(-10000);
+    const lines = log.split("\n").filter(Boolean).slice(-100);
+    res.json({ lines });
+  } catch (e) {
+    res.json({ lines: [], error: e.message });
+  }
+});
+
+app.get("/api/logs/remote", (_req, res) => {
+  try {
+    const log = fs.readFileSync("/data/kilo/remote.log", "utf8").slice(-10000);
+    const lines = log.split("\n").filter(Boolean).slice(-100);
+    res.json({ lines });
+  } catch (e) {
+    res.json({ lines: [], error: e.message });
+  }
+});
+
+app.get("/api/diagnostics", async (_req, res) => {
+  const diag = {
+    daemon_running: false,
+    auth_exists: false,
+    auth_type: null,
+    profile: null,
+    remote_log_lines: [],
+    daemon_log_lines: [],
+  };
+  try {
+    const ds = execFileSync("kilo", ["daemon", "status", "--json"], { encoding: "utf8", timeout: 5000 });
+    diag.daemon_running = true;
+    diag.daemon_status = ds.trim().slice(0, 300);
+  } catch (e) { diag.daemon_error = e.message; }
+  try {
+    const st = fs.statSync("/data/kilo/auth.json");
+    if (st.size > 10) diag.auth_exists = true;
+    const auth = JSON.parse(fs.readFileSync("/data/kilo/auth.json", "utf8"));
+    diag.auth_type = auth?.kilo?.type || null;
+  } catch (_) {}
+  try {
+    const profile = execFileSync("kilo", ["profile", "--json"], { encoding: "utf8", timeout: 10000 });
+    diag.profile = JSON.parse(profile);
+  } catch (e) { diag.profile_error = e.message; }
+  try {
+    const rl = fs.readFileSync("/data/kilo/remote.log", "utf8");
+    diag.remote_log_lines = rl.split("\n").filter(Boolean).slice(-20);
+  } catch (_) {}
+  try {
+    const dl = fs.readFileSync("/data/kilo/daemon.log", "utf8");
+    diag.daemon_log_lines = dl.split("\n").filter(Boolean).slice(-20);
+  } catch (_) {}
+  res.json(diag);
 });
 
 app.get("/api/logs", (req, res) => {
