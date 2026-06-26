@@ -1,7 +1,10 @@
-FROM node:20
+FROM node:20-slim
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    python3 \
+    make \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @kilocode/cli
@@ -9,6 +12,7 @@ RUN npm install -g @kilocode/cli
 WORKDIR /app
 
 COPY package.json /app/
+ENV PYTHON=/usr/bin/python3
 RUN npm install
 
 COPY server.js /app/
