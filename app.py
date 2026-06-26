@@ -473,23 +473,32 @@ def _run_device_auth():
 
         # If login was successful, enable Gateway relay
         if _device_auth["status"] == "success":
-            LOG.info("_run_device_auth enabling Gateway relay via kilo remote")
-            # Daemon is already running from entrypoint. Re-run kilo remote
-            # so it picks up the fresh auth.json from device auth flow.
-            # Increase timeout since remote connection can take ~20s.
+            LOG.info("_run_device_auth restarting daemon with auth and enabling relay")
             try:
-                r = subprocess.run(
+                subprocess.run(["kilo", "daemon", "stop"],
+                               timeout=10, capture_output=True)
+            except Exception:
+                pass
+            time.sleep(1)
+            # Start fresh daemon — now auth.json has device credentials
+            daemon_log = Path("/data/kilo/daemon.log")
+            try:
+                subprocess.Popen(
+                    ["kilo", "daemon", "start", "--foreground"],
+                    stdout=daemon_log.open("ab"), stderr=subprocess.STDOUT,
+                )
+            except Exception as exc:
+                LOG.warning("_run_device_auth daemon start: %s", exc)
+            time.sleep(3)
+            # Establish relay in background (persistent connection)
+            try:
+                subprocess.Popen(
                     ["kilo", "remote"],
-                    capture_output=True, text=True, timeout=30,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     env={**os.environ, "KILO_REMOTE": "1"},
                 )
-                LOG.info("_run_device_auth kilo remote exit=%d out=%s err=%s",
-                         r.returncode, r.stdout.strip()[:200], r.stderr.strip()[:200])
+                LOG.info("_run_device_auth kilo remote started in background")
                 _device_auth["message"] = "Login successful! Gateway relay enabled."
-            except subprocess.TimeoutExpired:
-                LOG.warning("_run_device_auth kilo remote timed out (30s) — "
-                            "relay may still connect in background")
-                _device_auth["message"] = "Login successful! Gateway relay may take a moment."
             except Exception as exc:
                 LOG.warning("_run_device_auth kilo remote failed: %s", exc)
 
