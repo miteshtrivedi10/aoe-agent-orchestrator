@@ -1,49 +1,50 @@
 #!/bin/bash
 set -e
 
-HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-mkdir -p "$HERMES_HOME"
+WORKSPACE="${WORKSPACE:-/workspace}"
+AOE_DATA_DIR="${AOE_DATA_DIR:-${WORKSPACE}/.aoe}"
 
-# Write all relevant env vars to .env so hermes gateway picks them up.
-ENV_FILE="$HERMES_HOME/.env"
-> "$ENV_FILE"
+mkdir -p "$WORKSPACE" "$AOE_DATA_DIR"
 
-for var in $(compgen -e); do
-  case "$var" in
-    HERMES_*|HF_*|OPENAI_*|OPENROUTER_*|ANTHROPIC_*|DEEPSEEK_*|\
-    GOOGLE_*|GEMINI_*|GITHUB_*|GITLAB_*|XAI_*|NOVITA_*|NVIDIA_*|\
-    AZURE_*|AWS_*|BEDROCK_*|DASHSCOPE_*|KIMI_*|MINIMAX_*|Z_AI_*|\
-    GLM_*|ARCEEAI_*|GMI_*|STEPFUN_*|XIAOMI_*|TOKENHUB_*|OLLAMA_*|OPENCODE_*|\
-    TELEGRAM_*|DISCORD_*|SLACK_*|SIGNAL_*|WHATSAPP_*|MATRIX_*|\
-    MATTERMOST_*|DINGTALK_*|FEISHU_*|WECOM_*|WEIXIN_*|QQ_*|\
-    BLUEBUBBLES_*|TEAMS_*|LINE_*|EMAIL_*|GATEWAY_*|SMS_*|\
-    HOME_ASSISTANT_*|NTFY_*|YUANBAO_*|\
-    N8N_*|LINEAR_*|\
-    MODEL|LM_*|COPILOT_*|CODEBOX_*|OWL_*)
-      val="${!var}"
-      if [ -n "$val" ]; then
-        echo "$var=$val" >> "$ENV_FILE"
-      fi
-      ;;
-  esac
-done
+# Ensure aoe is on PATH
+export PATH="/root/.local/bin:${PATH}"
 
-echo "[entrypoint] Wrote $(wc -l < "$ENV_FILE") vars"
-echo "[entrypoint] .env names: $(cut -d= -f1 "$ENV_FILE" | tr '\n' ' ')"
+# Set passphrase from env (recommended for HF Spaces behind proxy)
+AOE_PASSPHRASE="${AOE_PASSPHRASE:-}"
 
-# Write model to config.yaml
-MODEL="${MODEL:-openrouter/owl-alpha}"
-echo "model: ${MODEL}" > "$HERMES_HOME/config.yaml"
-echo "[entrypoint] model: ${MODEL}"
-
-# Write SOUL.md persona if not already present
-if [ ! -f "$HERMES_HOME/SOUL.md" ]; then
-  cat > "$HERMES_HOME/SOUL.md" << 'SOULEOF'
-You are Tuxedo, a personal AI assistant. You are helpful with coding, research, writing, analysis, and a bunch of other tasks. Be friendly and direct.
-SOULEOF
-  echo "[entrypoint] Created SOUL.md"
+# Start the web dashboard
+# --host 0.0.0.0  : bind to all interfaces (required for HF Spaces)
+# --port 7860     : HF Spaces default exposed port
+# --daemon        : run in background so we can do one-time setup
+# --auth mode:
+#   If AOE_PASSPHRASE is set: use passphrase auth (cleaner than token URL)
+#   Otherwise: use default token auth
+if [ -n "$AOE_PASSPHRASE" ]; then
+  echo "[entrypoint] Starting AoE web dashboard with passphrase auth on :7860"
+  aoe serve --host 0.0.0.0 --port 7860 --auth=passphrase --passphrase "$AOE_PASSPHRASE" --daemon
+else
+  echo "[entrypoint] Starting AoE web dashboard with token auth on :7860"
+  echo "[entrypoint] Set AOE_PASSPHRASE secret for cleaner login (no token URL needed)"
+  aoe serve --host 0.0.0.0 --port 7860 --daemon
 fi
 
-echo "[entrypoint] Starting Hermes Gateway..."
-export PYTHONUNBUFFERED=1
-exec hermes gateway run -vv 2>&1
+# Wait for daemon to be ready
+sleep 4
+
+# Print dashboard info
+echo "================================================"
+echo "  Agent of Empires — Web Dashboard"
+echo "================================================"
+aoe url --all 2>/dev/null || aoe url 2>/dev/null || true
+echo ""
+echo "  Port: 7860"
+echo "  Data dir: $AOE_DATA_DIR"
+echo "  Agents: opencode (verified: $(which opencode 2>/dev/null && echo 'found' || echo 'missing'))"
+echo "================================================"
+
+# Keep container running — tail the aoed log
+AOE_LOG_DIR="$AOE_DATA_DIR/logs"
+mkdir -p "$AOE_LOG_DIR"
+tail -f "$AOE_LOG_DIR"/*.log 2>/dev/null || \
+  tail -f /dev/null 2>/dev/null || \
+  sleep infinity

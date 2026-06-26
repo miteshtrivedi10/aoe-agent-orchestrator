@@ -1,30 +1,32 @@
 FROM python:3.11-slim
 
-LABEL org.opencontainers.image.source="https://github.com/NousResearch/hermes-agent"
-LABEL org.opencontainers.image.description="Hermes Agent — the self-improving AI agent by Nous Research"
-
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# Install system deps: git for skills/tools, others for browser tools
+# Install system deps: tmux for session management, git for repos, nodejs+npm for opencode
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     git \
-    ripgrep \
-    ffmpeg \
-    xz-utils && \
-    rm -rf /var/lib/apt/lists/* && \
+    tmux \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/* && \
     rm -rf /var/cache/apt/*
 
-# Install Hermes Agent with messaging extras (includes slack-bolt, slack-sdk)
-RUN pip install --no-cache-dir --break-system-packages "hermes-agent[all,messaging]"
+# Install opencode (coding agent)
+RUN npm install -g opencode
 
-ENV HERMES_HOME="/root/.hermes"
+# Install Agent of Empires (release binary with embedded web dashboard)
+RUN curl -fsSL https://raw.githubusercontent.com/agent-of-empires/agent-of-empires/main/scripts/install.sh | bash
 
-WORKDIR /root
+# Ensure aoe is on PATH (install script puts it in /root/.local/bin)
+ENV PATH="/root/.local/bin:${PATH}"
 
+WORKDIR /workspace
+
+COPY opencode.jsonc /root/.config/opencode/opencode.jsonc
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
