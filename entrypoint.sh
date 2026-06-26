@@ -105,9 +105,14 @@ echo "KILO_REMOTE set to 1"
 # Auth is served via /data/kilo/auth.json (symlinked to ~/.config/kilo/).
 # Exporting the full token as an env var would leak it to child processes and logs.
 
-# Start Kilo daemon in foreground mode so it stays alive.
-# Using --foreground ensures the process doesn't fork away from the shell.
-# Output is captured to a log file for diagnostics.
+# ── Start Flask FIRST — HF health check needs port 7860 up fast ────
+echo "Starting Flask web app on port 7860..."
+/opt/venv/bin/python app.py &
+FLASK_PID=$!
+# Give Flask a moment to bind the port
+sleep 2
+
+# ── Kilo daemon setup (runs after Flask is already serving) ─────────
 echo "Starting Kilo daemon..."
 DAEMON_LOG="/data/kilo/daemon.log"
 kilo daemon start --foreground >"$DAEMON_LOG" 2>&1 &
@@ -151,6 +156,7 @@ else
     echo "  Daemon relay: NOT DETECTED (sessions may not appear in Cloud Dashboard)"
 fi
 
-# Start Flask web app
-echo "Starting Flask web app on port 7860..."
-exec /opt/venv/bin/python app.py
+echo "Kilo setup complete. Flask is already serving on port 7860."
+
+# Keep container alive — wait for any child process (Flask, daemon) to exit
+wait
