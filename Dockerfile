@@ -1,5 +1,7 @@
 FROM python:3.11-slim
 
+LABEL huggingface.co/port="7860"
+
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
