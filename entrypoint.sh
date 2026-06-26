@@ -76,15 +76,12 @@ if kilo.get('type') == 'oauth' and 'expires' not in kilo:
 json.dump(data, open(auth_path, 'w'))
 os.chmod(auth_path, 0o600)
 
-# Debug: print auth structure (without exposing full token)
+# Debug: print auth structure (key names only, never values)
 for k, v in data.items():
     if isinstance(v, dict):
-        print(f'auth.{k} keys={list(v.keys())}', flush=True)
-        for kk, vv in v.items():
-            s = str(vv)
-            print(f'auth.{k}.{kk} prefix={s[:8]}... len={len(s)}', flush=True)
+        print(f'auth.{k} keys={list(v.keys())} present=true', flush=True)
     else:
-        print(f'auth.{k} type={type(v).__name__}', flush=True)
+        print(f'auth.{k} present=true', flush=True)
 " 2>&1 | while read line; do echo "  auth-debug: $line"; done
 else
     echo "KILO_AUTH_TOKEN not set — use web UI 'Login to Kilo Gateway' button for interactive auth"
@@ -104,13 +101,9 @@ print(f'config.json: {json.dumps(cfg)}', flush=True)
 export KILO_REMOTE=1
 echo "KILO_REMOTE set to 1"
 
-# Also set KILO_API_KEY as a fallback auth method (kilocodeToken() checks this env var)
-if [ -n "${KILO_AUTH_TOKEN:-}" ]; then
-    export KILO_API_KEY="$KILO_AUTH_TOKEN"
-    echo "KILO_API_KEY set from KILO_AUTH_TOKEN"
-else
-    echo "KILO_API_KEY not set — auth will come from ~/.config/kilo/auth.json (interactive login)"
-fi
+# Note: KILO_API_KEY / KILO_AUTH_TOKEN env vars are NOT exported.
+# Auth is served via /data/kilo/auth.json (symlinked to ~/.config/kilo/).
+# Exporting the full token as an env var would leak it to child processes and logs.
 
 # Start Kilo daemon in foreground mode so it stays alive.
 # Using --foreground ensures the process doesn't fork away from the shell.
@@ -124,9 +117,8 @@ echo "Daemon PID: $DAEMON_PID"
 # Give daemon time to stabilize and connect to Gateway
 sleep 8
 
-# Check daemon status
-echo "Daemon status check:"
-kilo daemon status --json 2>&1 || echo "  status: NOT READY"
+# Check daemon status (redirect output to daemon log, not stdout — logs are public)
+kilo daemon status --json >>"$DAEMON_LOG" 2>&1 || true
 
 # Enable Gateway relay at daemon level.
 # `kilo remote` tells the daemon to establish a WebSocket relay to api.kilo.ai.
@@ -152,19 +144,11 @@ except Exception as e:
     print(f'  WARNING: Sessions will NOT appear in Cloud Dashboard without Gateway connectivity')
 " 2>&1 | while read line; do echo "$line"; done
 
-# Show daemon log tail
-echo "Daemon log (last 30 lines):"
-tail -30 "$DAEMON_LOG" 2>/dev/null | while read line; do echo "  $line"; done || echo "  (no log yet)"
-
-# Check for relay evidence in daemon log
-echo "Relay status check:"
+# Check daemon log for relay evidence (no raw log output to public stdout)
 if grep -qi "relay\|gateway\|remote\|connected\|websocket\|cloud" "$DAEMON_LOG" 2>/dev/null; then
-    echo "  RELAY EVIDENCE FOUND in daemon log:"
-    grep -i "relay\|gateway\|remote\|connected\|websocket\|cloud" "$DAEMON_LOG" | tail -5 | while read line; do echo "    $line"; done
+    echo "  Daemon relay: CONNECTED"
 else
-    echo "  WARNING: No relay evidence in daemon log — sessions may not appear in Cloud Dashboard"
-    echo "  Full daemon log:"
-    cat "$DAEMON_LOG" 2>/dev/null | while read line; do echo "    $line"; done
+    echo "  Daemon relay: NOT DETECTED (sessions may not appear in Cloud Dashboard)"
 fi
 
 # Start Flask web app

@@ -222,8 +222,8 @@ def _checkout_repo(repo_url, branch, session_id):
         capture_output=True, text=True, timeout=300,
     )
     if result.returncode != 0:
-        LOG.error("_checkout_repo %s clone failed: %s", _log_prefix(label), result.stderr.strip())
-        raise RuntimeError(f"clone failed: {result.stderr.strip()}")
+        LOG.error("_checkout_repo %s clone failed (exit=%d)", _log_prefix(label), result.returncode)
+        raise RuntimeError("clone failed — check repo URL and access permissions")
 
     if branch:
         # Try checkout existing branch, then create locally
