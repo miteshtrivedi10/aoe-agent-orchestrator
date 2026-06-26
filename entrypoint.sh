@@ -10,7 +10,7 @@ export PATH="/root/.local/bin:${PATH}"
 echo "[entrypoint] Starting AoE web dashboard on :7860"
 
 if [ -n "$AOE_PASSPHRASE" ]; then
-  exec aoe serve --host 0.0.0.0 --port 7860 --auth=passphrase --passphrase "$AOE_PASSPHRASE"
+  exec aoe serve --host 0.0.0.0 --port 7860 --auth=passphrase --passphrase "$AOE_PASSPHRASE" --behind-proxy
 else
   exec aoe serve --host 0.0.0.0 --port 7860 --auth=token --behind-proxy
 fi
