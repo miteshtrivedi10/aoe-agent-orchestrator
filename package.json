@@ -1,0 +1,9 @@
+{
+  "name": "hermes-cloud",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "express": "^4.21.0",
+    "node-pty": "^1.0.0"
+  }
+}
