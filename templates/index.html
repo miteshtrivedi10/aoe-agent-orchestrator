@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kilo Cloud Manager</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f172a; color: #e2e8f0; min-height: 100vh;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 2rem 1rem; }
+  header { text-align: center; margin-bottom: 2.5rem; }
+  header h1 { font-size: 1.75rem; font-weight: 700; color: #f1f5f9; }
+  header p { color: #94a3b8; margin-top: 0.25rem; font-size: 0.9rem; }
+  .card {
+    background: #1e293b; border-radius: 12px; padding: 1.5rem;
+    border: 1px solid #334155; margin-bottom: 1.5rem;
+  }
+  .card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: #f1f5f9; }
+  .input-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .input-row input {
+    flex: 1; min-width: 200px; padding: 0.7rem 1rem; border-radius: 8px;
+    border: 1px solid #475569; background: #0f172a; color: #e2e8f0;
+    font-size: 0.95rem; outline: none; transition: border-color 0.15s;
+  }
+  .input-row input:focus { border-color: #6366f1; }
+  .input-row input::placeholder { color: #64748b; }
+  .btn {
+    padding: 0.7rem 1.5rem; border-radius: 8px; border: none;
+    font-size: 0.95rem; font-weight: 600; cursor: pointer;
+    transition: background 0.15s, opacity 0.15s; white-space: nowrap;
+  }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: #6366f1; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #4f46e5; }
+  .btn-danger { background: #ef4444; color: #fff; }
+  .btn-danger:hover:not(:disabled) { background: #dc2626; }
+  .btn-sm { padding: 0.4rem 1rem; font-size: 0.85rem; }
+
+  .empty { text-align: center; color: #64748b; padding: 2rem 0; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 0.8rem; color: #94a3b8;
+       text-transform: uppercase; letter-spacing: 0.05em;
+       padding-bottom: 0.75rem; border-bottom: 1px solid #334155; }
+  td { padding: 0.75rem 0; border-bottom: 1px solid #1e293b;
+       font-size: 0.9rem; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  td .repo { font-weight: 600; color: #e2e8f0; }
+  td .url { color: #94a3b8; font-size: 0.8rem; }
+  .badge {
+    display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
+    font-size: 0.75rem; font-weight: 600;
+  }
+  .badge-running { background: #065f46; color: #6ee7b7; }
+  .badge-stopped { background: #78350f; color: #fbbf24; }
+  .badge-killed { background: #7f1d1d; color: #fca5a5; }
+  .badge-error { background: #7f1d1d; color: #fca5a5; }
+  .toast {
+    position: fixed; top: 1rem; right: 1rem; padding: 0.75rem 1.25rem;
+    border-radius: 8px; color: #fff; font-size: 0.9rem; font-weight: 500;
+    opacity: 0; transform: translateY(-10px); transition: all 0.3s;
+    z-index: 1000; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast-success { background: #065f46; }
+  .toast-error { background: #991b1b; }
+  .spinner {
+    display: inline-block; width: 1rem; height: 1rem;
+    border: 2px solid #6366f1; border-top-color: transparent;
+    border-radius: 50%; animation: spin 0.6s linear infinite;
+    vertical-align: middle; margin-right: 0.5rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .status-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #22c55e; margin-right: 0.4rem; animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .status-dot-stopped {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #64748b; margin-right: 0.4rem;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Hermes — Kilo Session Manager</h1>
+    <p>Spin up Kilo CLI sessions from any GitHub repo</p>
+  </header>
+
+  <div class="card" id="authCard" style="display:none; border-color:#f59e0b">
+    <h2>Kilo Gateway Authentication</h2>
+    <p style="color:#94a3b8;font-size:0.9rem;margin-bottom:1rem">
+      Authenticate with the Kilo Gateway to enable session relay to the Cloud Dashboard.
+    </p>
+    <div id="authStatus" style="margin-bottom:1rem;font-size:0.9rem"></div>
+    <div id="authFlow" style="display:none">
+      <div style="background:#0f172a;border-radius:8px;padding:1.25rem;margin-bottom:1rem;text-align:center">
+        <p style="color:#94a3b8;font-size:0.85rem;margin-bottom:0.75rem">Open this URL in your browser:</p>
+        <a id="authUrl" href="#" target="_blank" style="color:#6366f1;font-size:1.1rem;font-weight:600;word-break:break-all"></a>
+        <div style="margin-top:1rem">
+          <p style="color:#94a3b8;font-size:0.85rem">Enter this code:</p>
+          <div id="authCode" style="font-size:1.5rem;font-weight:700;color:#f1f5f9;letter-spacing:0.1em;margin-top:0.5rem;font-family:monospace"></div>
+        </div>
+        <div id="authSpinner" style="margin-top:1rem">
+          <span class="spinner"></span>
+          <span style="color:#94a3b8;font-size:0.85rem">Waiting for authorization...</span>
+        </div>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="cancelAuth()">Cancel</button>
+    </div>
+    <div id="authActions">
+      <button class="btn btn-primary" id="loginBtn" onclick="startAuth()">Login to Kilo Gateway</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>New Session</h2>
+    <div class="input-row">
+      <input type="text" id="repoUrl" placeholder="https://github.com/user/repo" autocomplete="off" style="flex:2;min-width:250px">
+      <input type="text" id="branch" placeholder="Branch (optional)" autocomplete="off" style="flex:1;min-width:120px">
+      <button class="btn btn-primary" id="spinBtn" onclick="spinUp()">Spin Up Agent</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Workspace Sessions</h2>
+    <div id="sessionsList">
+      <div class="empty">No active sessions. Spin one up above.</div>
+    </div>
+  </div>
+
+  <div class="card" style="border-color:#6366f1">
+    <h2>Diagnostics
+      <button class="btn btn-primary btn-sm" onclick="loadDiag()" style="float:right; font-size:0.8rem">Refresh</button>
+    </h2>
+    <div id="diagPanel" style="font-size:0.8rem;line-height:1.5">
+      <div class="empty">Loading diagnostics...</div>
+    </div>
+
+    <h2 style="margin-top:1rem">Recent Logs
+      <button class="btn btn-primary btn-sm" onclick="loadLogs()" style="float:right; font-size:0.8rem">Refresh</button>
+    </h2>
+    <div id="logPanel" style="background:#0f172a;border-radius:8px;padding:0.75rem;font-size:0.75rem;line-height:1.4;max-height:400px;overflow-y:auto;font-family:monospace;white-space:pre-wrap;word-break:break-all">
+      <div class="empty">Loading logs...</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const repoUrl = document.getElementById('repoUrl');
+const branchInput = document.getElementById('branch');
+const spinBtn = document.getElementById('spinBtn');
+const sessionsList = document.getElementById('sessionsList');
+
+function toast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast toast-' + type + ' show';
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+async function spinUp() {
+  const url = repoUrl.value.trim();
+  if (!url) { toast('Enter a repo URL', 'error'); return; }
+  const branch = branchInput.value.trim();
+  spinBtn.disabled = true; spinBtn.innerHTML = '<span class="spinner"></span>Spinning...';
+  try {
+    const body = {repo_url: url};
+    if (branch) body.branch = branch;
+    const res = await fetch('/api/spin-up', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { toast(data.error || 'Failed', 'error'); }
+    else { toast('Session started for ' + data.repo_name, 'success'); repoUrl.value = ''; branchInput.value = ''; }
+  } catch(e) { toast('Network error', 'error'); }
+  finally { spinBtn.disabled = false; spinBtn.textContent = 'Spin Up Agent'; }
+  loadSessions();
+}
+
+async function killSession(id) {
+  try {
+    const res = await fetch('/api/kill/' + id, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) toast('Session killed', 'success');
+    else toast(data.error || 'Failed', 'error');
+  } catch(e) { toast('Network error', 'error'); }
+  loadSessions();
+}
+
+async function loadSessions() {
+  try {
+    const res = await fetch('/api/sessions');
+    const sessions = await res.json();
+    if (sessions.length === 0) {
+      sessionsList.innerHTML = '<div class="empty">No sessions yet. Spin one up above.</div>';
+      return;
+    }
+    let html = '<table><thead><tr><th>Repository</th><th>Branch</th><th>Started</th><th>Status</th><th></th></tr></thead><tbody>';
+    for (const s of sessions) {
+      const status = s.status || 'running';
+      const dotClass = status === 'running' ? 'status-dot' : 'status-dot-stopped';
+      const badgeClass = 'badge-' + status;
+      const killBtn = status === 'running'
+        ? '<button class="btn btn-danger btn-sm" onclick="killSession(\'' + s.id + '\')">Kill</button>'
+        : '<span style="color:#64748b;font-size:0.8rem">' + (s.exit_code != null ? 'exit ' + s.exit_code : '') + '</span>';
+      html += '<tr>' +
+        '<td><div class="repo">' + esc(s.repo_name) + '</div><div class="url">' + esc(s.repo_url) + '</div></td>' +
+        '<td style="color:#94a3b8;font-size:0.85rem">' + esc(s.branch || 'default') + '</td>' +
+        '<td style="color:#94a3b8;font-size:0.85rem">' + timeAgo(s.started_at) + '</td>' +
+        '<td><span class="' + dotClass + '"></span><span class="badge ' + badgeClass + '">' + esc(status) + '</span></td>' +
+        '<td style="text-align:right">' + killBtn + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    sessionsList.innerHTML = html;
+  } catch(e) { /* ignore polling errors */ }
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function timeAgo(iso) {
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  return Math.floor(diff / 3600) + 'h ago';
+}
+
+async function loadDiag() {
+  try {
+    const res = await fetch('/api/status');
+    const d = await res.json();
+    let html = '<table style="width:100%"><tbody>';
+    for (const [k, v] of Object.entries(d)) {
+      const val = v === null ? '<span style="color:#ef4444">null</span>'
+               : v === true ? '<span style="color:#22c55e">true</span>'
+               : v === false ? '<span style="color:#ef4444">false</span>'
+               : String(v).substring(0, 300);
+      html += '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0">' + k + '</td>'
+            + '<td style="padding:0.2rem 0">' + val + '</td></tr>';
+    }
+    html += '</tbody></table>';
+    document.getElementById('diagPanel').innerHTML = html;
+  } catch(e) {
+    document.getElementById('diagPanel').innerHTML = '<div class="empty">Error: ' + e.message + '</div>';
+  }
+}
+
+async function loadLogs() {
+  try {
+    const res = await fetch('/api/logs?n=100');
+    const d = await res.json();
+    const el = document.getElementById('logPanel');
+    el.innerHTML = d.lines.reverse().map(l => esc(l)).join('\n');
+    el.scrollTop = el.scrollHeight;
+  } catch(e) {
+    document.getElementById('logPanel').innerHTML = '<div class="empty">Error: ' + e.message + '</div>';
+  }
+}
+
+function enterSpin(e) { if (e.key === 'Enter') spinUp(); }
+repoUrl.addEventListener('keydown', enterSpin);
+branchInput.addEventListener('keydown', enterSpin);
+loadSessions();
+loadDiag();
+loadLogs();
+checkAuth();
+setInterval(loadSessions, 3000);
+setInterval(loadDiag, 5000);
+setInterval(loadLogs, 5000);
+
+// ── Device Auth Flow ──────────────────────────────────────────────
+let authPollInterval = null;
+
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/status');
+    const d = await res.json();
+    const card = document.getElementById('authCard');
+    const statusEl = document.getElementById('authStatus');
+    const flowEl = document.getElementById('authFlow');
+    const actionsEl = document.getElementById('authActions');
+
+    if (d.status === 'success') {
+      card.style.display = 'none';
+      return;
+    }
+
+    // Show auth card if auth is not successful
+    card.style.display = 'block';
+
+    if (d.status === 'pending') {
+      showAuthFlow(d);
+    } else if (d.status === 'failed') {
+      statusEl.innerHTML = '<span style="color:#ef4444">' + esc(d.message || 'Authentication failed') + '</span>';
+      flowEl.style.display = 'none';
+      actionsEl.style.display = 'block';
+    } else if (d.status === 'cancelled') {
+      statusEl.innerHTML = '<span style="color:#f59e0b">Login cancelled</span>';
+      flowEl.style.display = 'none';
+      actionsEl.style.display = 'block';
+    } else {
+      statusEl.innerHTML = '<span style="color:#94a3b8">Not authenticated. Click below to login.</span>';
+      flowEl.style.display = 'none';
+      actionsEl.style.display = 'block';
+    }
+  } catch(e) { /* ignore */ }
+}
+
+function showAuthFlow(d) {
+  document.getElementById('authStatus').innerHTML = '';
+  document.getElementById('authFlow').style.display = 'block';
+  document.getElementById('authActions').style.display = 'none';
+  if (d.url) {
+    const urlEl = document.getElementById('authUrl');
+    urlEl.href = d.url;
+    urlEl.textContent = d.url;
+  }
+  if (d.code) {
+    document.getElementById('authCode').textContent = d.code;
+  }
+  if (d.status === 'success') {
+    document.getElementById('authSpinner').innerHTML =
+      '<span style="color:#22c55e;font-weight:600">Login successful! Reloading...</span>';
+    setTimeout(() => location.reload(), 2000);
+  } else if (d.status === 'failed') {
+    document.getElementById('authSpinner').innerHTML =
+      '<span style="color:#ef4444">' + esc(d.message || 'Failed') + '</span>';
+  }
+}
+
+async function startAuth() {
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Starting...';
+  try {
+    const res = await fetch('/api/auth/login', { method: 'POST' });
+    const d = await res.json();
+    if (d.status === 'pending' || d.url) {
+      showAuthFlow(d);
+      // Start polling
+      if (authPollInterval) clearInterval(authPollInterval);
+      authPollInterval = setInterval(pollAuth, 3000);
+    } else {
+      document.getElementById('authStatus').innerHTML =
+        '<span style="color:#ef4444">' + esc(d.message || 'Failed to start login') + '</span>';
+      btn.disabled = false;
+      btn.textContent = 'Login to Kilo Gateway';
+    }
+  } catch(e) {
+    document.getElementById('authStatus').innerHTML =
+      '<span style="color:#ef4444">Network error: ' + esc(e.message) + '</span>';
+    btn.disabled = false;
+    btn.textContent = 'Login to Kilo Gateway';
+  }
+}
+
+async function pollAuth() {
+  try {
+    const res = await fetch('/api/auth/status');
+    const d = await res.json();
+    showAuthFlow(d);
+    if (d.status === 'success' || d.status === 'failed' || d.status === 'cancelled') {
+      clearInterval(authPollInterval);
+      authPollInterval = null;
+      if (d.status === 'success') {
+        setTimeout(() => location.reload(), 2000);
+      }
+    }
+  } catch(e) { /* ignore */ }
+}
+
+async function cancelAuth() {
+  try { await fetch('/api/auth/cancel', { method: 'POST' }); } catch(e) {}
+  if (authPollInterval) { clearInterval(authPollInterval); authPollInterval = null; }
+  checkAuth();
+}
+</script>
+</body>
+</html>

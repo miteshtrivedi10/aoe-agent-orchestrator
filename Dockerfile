@@ -1,36 +1,26 @@
-FROM python:3.11-slim
+FROM node:20-slim
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
-
-# Install system deps: tmux for session management, git for repos
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
+RUN apt-get update && apt-get install -y \
     git \
-    tmux \
-    && rm -rf /var/lib/apt/lists/* && \
-    rm -rf /var/cache/apt/*
+    python3 \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install opencode (standalone binary — not an npm package)
-RUN curl -fsSL https://github.com/anomalyco/opencode/releases/download/v1.17.11/opencode-linux-x64.tar.gz -o /tmp/opencode.tar.gz \
-    && tar xzf /tmp/opencode.tar.gz -C /tmp \
-    && find /tmp -name "opencode" -type f -executable -exec mv {} /usr/local/bin/opencode \; \
-    && rm -rf /tmp/opencode.tar.gz /tmp/opencode*
+RUN npm install -g @kilocode/cli
 
-# Install Agent of Empires (release binary with embedded web dashboard)
-RUN curl -fsSL https://raw.githubusercontent.com/agent-of-empires/agent-of-empires/main/scripts/install.sh | bash
+WORKDIR /app
 
-# Ensure aoe is on PATH (install script puts it in /root/.local/bin)
-ENV PATH="/root/.local/bin:${PATH}"
+COPY requirements.txt /app/
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-WORKDIR /workspace
+COPY app.py /app/
+COPY templates/ /app/templates/
+COPY entrypoint.sh /app/entrypoint.sh
 
-COPY opencode.jsonc /root/.config/opencode/opencode.jsonc
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 7860
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]
