@@ -464,6 +464,21 @@ def _run_device_auth():
         _device_auth["master_fd"] = None
         _device_auth["process"] = None
 
+        # If login was successful, enable Gateway relay
+        if _device_auth["status"] == "success":
+            LOG.info("_run_device_auth enabling Gateway relay via kilo remote")
+            try:
+                r = subprocess.run(
+                    ["kilo", "remote"],
+                    capture_output=True, text=True, timeout=15,
+                    env={**os.environ, "KILO_REMOTE": "1"},
+                )
+                LOG.info("_run_device_auth kilo remote exit=%d out=%s err=%s",
+                         r.returncode, r.stdout.strip()[:200], r.stderr.strip()[:200])
+                _device_auth["message"] = "Login successful! Gateway relay enabled."
+            except Exception as exc:
+                LOG.warning("_run_device_auth kilo remote failed: %s", exc)
+
         if _device_auth["status"] == "pending":
             _device_auth["status"] = "failed"
             _device_auth["message"] = "Login timed out (5 minutes)"
