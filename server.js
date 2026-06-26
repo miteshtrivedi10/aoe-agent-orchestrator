@@ -176,13 +176,10 @@ async function startKiloSession(workDir, label) {
     env,
   });
 
-  const sharedBuf = [];
-
   ptyProcess.onData((data) => {
     log(
       `_relay_pty ${logPrefix(label)} raw-chunk len=${Buffer.byteLength(data)} preview=${sanitizeLog(data.slice(0, 200).replace(/\n/g, "\\n"))}`
     );
-    sharedBuf.push(Buffer.from(data));
     const lines = data.split("\n");
     for (const line of lines) {
       const stripped = stripAnsi(line).trim();
@@ -192,18 +189,10 @@ async function startKiloSession(workDir, label) {
     }
   });
 
-  log(`_start_kilo_session ${logPrefix(label)} waiting for prompt...`);
-  const ready = await waitForPrompt(sharedBuf, label, 30);
-
-  await sleep(2000);
-
-  log(`_start_kilo_session ${logPrefix(label)} sending /remote to register with Gateway`);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    sendPtyCommand(ptyProcess, "/remote", label, `/remote attempt ${attempt + 1}`);
-    await sleep(2000);
-  }
-
-  await sleep(2000);
+  // Kilo registers with Gateway automatically via KILO_REMOTE=1 + daemon relay.
+  // Just wait for initial render, then send the first prompt.
+  log(`_start_kilo_session ${logPrefix(label)} waiting for Kilo to initialize...`);
+  await sleep(8000);
 
   const prompt = "based on readme explain project in 2 lines";
   log(`_start_kilo_session ${logPrefix(label)} sending initial prompt`);
