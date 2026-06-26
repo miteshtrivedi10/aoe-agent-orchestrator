@@ -188,6 +188,14 @@ def _start_kilo_session(work_dir, label):
 
     time.sleep(2)
 
+    # Register session with Kilo Gateway relay via /remote
+    LOG.info("_start_kilo_session %s sending /remote to register with Gateway", _log_prefix(label))
+    for attempt in range(3):
+        _send_pty_command(master_fd, "/remote", label, desc=f"/remote attempt {attempt+1}")
+        time.sleep(2)
+
+    time.sleep(2)
+
     # Send the one-time project prompt
     prompt = "based on readme explain project in 2 lines"
     LOG.info("_start_kilo_session %s sending initial prompt", _log_prefix(label))
