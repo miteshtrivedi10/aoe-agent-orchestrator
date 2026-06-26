@@ -466,7 +466,16 @@ def _run_device_auth():
 
         # If login was successful, enable Gateway relay
         if _device_auth["status"] == "success":
-            LOG.info("_run_device_auth enabling Gateway relay via kilo remote")
+            LOG.info("_run_device_auth starting kilo daemon and enabling Gateway relay")
+            daemon_log = Path("/data/kilo/daemon.log")
+            try:
+                subprocess.Popen(
+                    ["kilo", "daemon", "start", "--foreground"],
+                    stdout=daemon_log.open("ab"), stderr=subprocess.STDOUT,
+                )
+            except Exception as exc:
+                LOG.warning("_run_device_auth daemon start: %s", exc)
+            time.sleep(3)
             try:
                 r = subprocess.run(
                     ["kilo", "remote"],
