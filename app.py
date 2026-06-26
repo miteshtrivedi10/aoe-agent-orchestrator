@@ -285,8 +285,15 @@ def api_status():
         result["kilo_version"] = r.stdout.strip()[:100] or r.stderr.strip()[:100]
     except Exception:
         pass
+    try:
+        dr = subprocess.run(["kilo", "daemon", "status"],
+                            capture_output=True, text=True, timeout=10)
+        if dr.returncode == 0 and "running" in dr.stdout:
+            result["daemon_running"] = True
+    except Exception:
+        pass
     auth_path = Path("/data/kilo/auth.json")
-    if auth_path.exists():
+    if auth_path.exists() and auth_path.stat().st_size > 10:
         result["auth_exists"] = True
     return jsonify(result)
 
@@ -466,42 +473,23 @@ def _run_device_auth():
 
         # If login was successful, enable Gateway relay
         if _device_auth["status"] == "success":
-            LOG.info("_run_device_auth starting kilo daemon and enabling Gateway relay")
-            daemon_log = Path("/data/kilo/daemon.log")
-            # Clean up any stale daemon first
-            try:
-                subprocess.run(["kilo", "daemon", "stop"], timeout=10,
-                               capture_output=True)
-            except Exception:
-                pass
-            time.sleep(1)
-            # Start the daemon (--foreground so Popen keeps it alive)
-            try:
-                subprocess.Popen(
-                    ["kilo", "daemon", "start", "--foreground"],
-                    stdout=daemon_log.open("ab"), stderr=subprocess.STDOUT,
-                )
-            except Exception as exc:
-                LOG.warning("_run_device_auth daemon start: %s", exc)
-            time.sleep(5)
-            # Verify daemon is running
-            try:
-                dr = subprocess.run(["kilo", "daemon", "status"],
-                                    capture_output=True, text=True, timeout=10)
-                LOG.info("_run_device_auth daemon status exit=%d out=%s err=%s",
-                         dr.returncode, dr.stdout.strip()[:200], dr.stderr.strip()[:200])
-            except Exception as exc:
-                LOG.warning("_run_device_auth daemon status: %s", exc)
-            # Enable gateway relay
+            LOG.info("_run_device_auth enabling Gateway relay via kilo remote")
+            # Daemon is already running from entrypoint. Re-run kilo remote
+            # so it picks up the fresh auth.json from device auth flow.
+            # Increase timeout since remote connection can take ~20s.
             try:
                 r = subprocess.run(
                     ["kilo", "remote"],
-                    capture_output=True, text=True, timeout=15,
+                    capture_output=True, text=True, timeout=30,
                     env={**os.environ, "KILO_REMOTE": "1"},
                 )
                 LOG.info("_run_device_auth kilo remote exit=%d out=%s err=%s",
                          r.returncode, r.stdout.strip()[:200], r.stderr.strip()[:200])
                 _device_auth["message"] = "Login successful! Gateway relay enabled."
+            except subprocess.TimeoutExpired:
+                LOG.warning("_run_device_auth kilo remote timed out (30s) — "
+                            "relay may still connect in background")
+                _device_auth["message"] = "Login successful! Gateway relay may take a moment."
             except Exception as exc:
                 LOG.warning("_run_device_auth kilo remote failed: %s", exc)
 
