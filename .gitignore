@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.local
+.env.*
+*.log
+*.key
+*.pem
+/data/
+/repos/
+/sessions.json
