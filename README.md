@@ -8,6 +8,8 @@ app_port: 7860
 pinned: false
 ---
 
+[![Build and Push to GHCR](https://github.com/miteshtrivedi10/aoe-agent-orchestrator/actions/workflows/docker-build.yml/badge.svg?branch=main)](https://github.com/miteshtrivedi10/aoe-agent-orchestrator/actions/workflows/docker-build.yml)
+
 > **Security status — now hardened.** The `/api/*` surface is split into three
 > classes (reads / writes / auth-bootstrap), each tier-gated by a bearer token
 > and a per-IP rate limit. `GET /api/status` is intentionally public so you can
