@@ -69,8 +69,27 @@ check "GET /api/relay-check no tok"     "401" "$(status "$BASE/api/relay-check")
 
 echo "── Write endpoints (auth + writeLimiter) ──"
 check "POST /api/spin-up no token"      "401" "$(status -X POST "$BASE/api/spin-up")"
-check "POST /api/spin-up bad body"      "400" "$(status -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/spin-up")"
-check "POST /api/spin-up good body"     "500" "$(status -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"repo_url":"https://example.com/nope.git"}' "$BASE/api/spin-up")"
+check "POST /api/spin-up empty body"    "400" "$(status -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' "$BASE/api/spin-up")"
+check "POST /api/spin-up no branch"     "400" "$(status -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"repo_url":"https://example.com/x.git"}' "$BASE/api/spin-up")"
+check "POST /api/spin-up empty branch"  "400" "$(status -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"repo_url":"https://example.com/x.git","branch":"   "}' "$BASE/api/spin-up")"
+check "POST /api/spin-up bad branch chars" "400" "$(status -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"repo_url":"https://example.com/x.git","branch":"bad branch with spaces"}' "$BASE/api/spin-up")"
+check "POST /api/spin-up bad ref ('..')"     "400" "$(status -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"repo_url":"https://example.com/x.git","branch":"feature..bad"}' "$BASE/api/spin-up")"
+check "POST /api/spin-up bad URL no-.git"   "400" "$(status -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"repo_url":"https://example.com/no-suffix","branch":"main"}' "$BASE/api/spin-up")"
+check "POST /api/spin-up valid .git+branch → 500 (clone fails)" "500" "$(status -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"repo_url":"https://example.com/nope.git","branch":"main"}' "$BASE/api/spin-up")"
+
+# Show the human-readable error so we know WHY 400s are firing
+echo
+echo "── Error message spot-check (last 400 body each) ──"
+for body in '{}' \
+            '{"repo_url":"https://example.com/x.git"}' \
+            '{"repo_url":"https://example.com/x.git","branch":"bad branch"}' \
+            '{"repo_url":"https://example.com/x.git","branch":"feature..bad"}' \
+            '{"repo_url":"https://example.com/no-suffix","branch":"main"}'; do
+  msg=$(curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+              -d "$body" "$BASE/api/spin-up" | jq -r '.error // "(no error field)"' 2>/dev/null)
+  printf "  body=%-72s → %s\n" "$body" "$msg"
+done
+
 check "POST /api/kill no token"         "401" "$(status -X POST "$BASE/api/kill/aa")"
 check "POST /api/kill baddies"          "404" "$(status -X POST -H "Authorization: Bearer $TOKEN" "$BASE/api/kill/nope")"
 check "POST /api/sessions/.../continue no token" "401" "$(status -X POST "$BASE/api/sessions/aa/continue")"

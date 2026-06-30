@@ -338,31 +338,24 @@ function checkoutRepo(repoUrl, branch, sessionId) {
   log(`_checkout_repo ${logPrefix(label)} url=${repoUrl} branch=${branch} dir=${ws}`);
 
   const url = cloneUrl(repoUrl);
-  const cloneResult = execFileSync("git", ["clone", url, ws], {
+  execFileSync("git", ["clone", url, ws], {
     timeout: 300000,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  let resolvedBranch = branch;
-
-  if (branch) {
-    try {
-      execFileSync("git", ["-C", ws, "checkout", branch], {
-        timeout: 30000,
-        stdio: "ignore",
-      });
-    } catch (_) {
-      log(`_checkout_repo ${logPrefix(label)} branch '${branch}' not found, creating from default`);
-      execFileSync("git", ["-C", ws, "checkout", "-b", branch], {
-        timeout: 30000,
-        stdio: "ignore",
-      });
-    }
-  } else {
-    resolvedBranch = `hermes-${sessionId}`;
-    log(`_checkout_repo ${logPrefix(label)} no branch given, creating ${resolvedBranch}`);
-    execFileSync("git", ["-C", ws, "checkout", "-b", resolvedBranch], {
+  // Branch is mandatory (already vetted by BRANCH_RE at the route layer).
+  // Try the existing branch first; if it doesn't exist locally yet (shallow
+  // / no upstream tracking), create it from HEAD so the user's work has a
+  // named ref to push to.
+  try {
+    execFileSync("git", ["-C", ws, "checkout", branch], {
+      timeout: 30000,
+      stdio: "ignore",
+    });
+  } catch (_) {
+    log(`_checkout_repo ${logPrefix(label)} branch '${branch}' not present, creating from HEAD`);
+    execFileSync("git", ["-C", ws, "checkout", "-b", branch], {
       timeout: 30000,
       stdio: "ignore",
     });
@@ -370,7 +363,7 @@ function checkoutRepo(repoUrl, branch, sessionId) {
 
   const files = fs.readdirSync(ws);
   log(`_checkout_repo ${logPrefix(label)} entries: ${files.slice(0, 10).join(", ")}`);
-  return { workDir: ws, branch: resolvedBranch };
+  return { workDir: ws, branch };
 }
 
 const DEVICE_AUTH = {
@@ -715,27 +708,42 @@ app.get("/api/sessions", authGate, readLimiter, (_req, res) => {
   res.json(sessions);
 });
 
+// repo_url must end in .git (covers https://, git@..., ssh://..., file://...).
+// We reject bare web URLs like https://github.com/owner/repo (no .git) so
+// pasting a UI link doesn't silently mishandle cloning.
+const GIT_URL_RE = /\.git(?:\/?|#.*)?$/i;
+
+// Git ref names: per `git check-ref-format` — no spaces, no `~`, no `^`, no
+// `:`, no `?`, no `*`, no `[`, no `\`, no control chars, no leading `-`,
+// no `..`, no `@{`, no trailing `.lock`, no backslash. Length 1-255.
+// We do NOT touch a shell — branch is passed via execFileSync argv — but
+// rejecting weird chars up front stops users from accidentally pasting
+// a commit SHA or reflog path.
+const BRANCH_RE = /^(?!-)(?!.*\.\.)(?!.*@\{)(?!.*\.lock$)[A-Za-z0-9._/-]{1,255}$/;
+
 app.post("/api/spin-up", authGate, writeLimiter, async (req, res) => {
   const data = req.body || {};
   const repoUrl = (data.repo_url || "").trim();
-  let branch = (data.branch || "").trim() || null;
+  const branch = (data.branch || "").trim();
 
   if (!repoUrl) {
     return res.status(400).json({ error: "repo_url required" });
   }
-
-  // Only accept proper git URLs (must end in .git, OR be an SSH form
-  // git@host:owner/repo[.git] / ssh://...). Bare web URLs like
-  // https://github.com/owner/repo (no .git) are rejected so users don't
-  // accidentally paste a UI link and we fall over on the clone.
-  const isGitUrl =
-    /\.git(?:\/?|#.*)?$/i.test(repoUrl) ||
-    /^git@[^:]+:[^/]+\/[^/]+\.git$/i.test(repoUrl) ||
-    /^ssh:\/\/[^/]+\/.*\.git$/i.test(repoUrl);
-  if (!isGitUrl) {
+  if (!GIT_URL_RE.test(repoUrl)) {
     return res.status(400).json({
-      error: "repo_url must be a .git URL — e.g. https://github.com/owner/repo.git or git@github.com:owner/repo.git",
+      error: "repo_url must end in .git — e.g. https://github.com/owner/repo.git or git@github.com:owner/repo.git",
       received: repoUrl,
+    });
+  }
+  if (!branch) {
+    return res.status(400).json({
+      error: "branch required — pick the branch you want this session to work on (e.g. 'main')",
+    });
+  }
+  if (!BRANCH_RE.test(branch)) {
+    return res.status(400).json({
+      error: "branch contains characters git cannot use as a ref name (spaces, ':', '..', '~', '^', etc. are forbidden)",
+      received: branch,
     });
   }
 
@@ -744,11 +752,10 @@ app.post("/api/spin-up", authGate, writeLimiter, async (req, res) => {
   const label = sessionId;
   log(`spin-up session=${label} repo=${repo} branch=${branch}`);
 
-  let workDir, resolvedBranch;
+  let workDir;
   try {
     const result = checkoutRepo(repoUrl, branch, sessionId);
     workDir = result.workDir;
-    resolvedBranch = result.branch;
   } catch (e) {
     return res.status(500).json({ error: "clone failed \u2014 check repo URL and access permissions" });
   }
@@ -764,7 +771,7 @@ app.post("/api/spin-up", authGate, writeLimiter, async (req, res) => {
     id: sessionId,
     repo_url: repoUrl,
     repo_name: repo,
-    branch: resolvedBranch,
+    branch,
     work_dir: workDir,
     pid: kiloPid,
     status: "running",
@@ -774,7 +781,7 @@ app.post("/api/spin-up", authGate, writeLimiter, async (req, res) => {
   const sessions = updateStatus(loadSessions());
   sessions.push(session);
   saveSessions(sessions);
-  log(`spin-up ${logPrefix(label)} created id=${sessionId} pid=${kiloPid} branch=${resolvedBranch}`);
+  log(`spin-up ${logPrefix(label)} created id=${sessionId} pid=${kiloPid} branch=${branch}`);
   res.status(201).json(session);
 });
 

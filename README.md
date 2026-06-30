@@ -59,7 +59,7 @@ curl -sS -H "Authorization: Bearer $TOKEN" \
 
 # Authenticated write
 curl -sS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-     -d '{"repo_url":"https://github.com/owner/repo.git"}' \
+     -d '{"repo_url":"https://github.com/owner/repo.git","branch":"main"}' \
      https://<space>.hf.space/api/spin-up | jq
 
 # Without token — 401
@@ -84,3 +84,17 @@ The Kilo API token in `/data/kilo/auth.json` is never echoed back through
 any endpoint. `inspectAuth()` returns metadata (expiry, type, validity)
 only — never the literal token. The relay-check probe uses the token to
 make the outbound ping but strips it before responding.
+
+## `POST /api/spin-up` request validation
+
+Both fields are required and strictly validated before cloning starts:
+
+| Field | Rule |
+|---|---|
+| `repo_url` | must end with `.git` (covers `https://`, `git@…:`, `ssh://`, `file://`); bare web URLs like `https://github.com/owner/repo` (no `.git`) are rejected |
+| `branch`   | non-empty; must match `git check-ref-format` — no spaces, no `:`, no `..`, no leading `-`, no `@{`, no trailing `.lock`, no control chars, length 1–255 |
+
+Branch is mandatory because the session has to operate against a known
+ref — picking `main` (or whatever default you'd like) is the operator's
+call. Validation errors return `HTTP 400` with a specific `error` field
+explaining which rule was broken.

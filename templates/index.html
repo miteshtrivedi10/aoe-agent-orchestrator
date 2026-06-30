@@ -120,8 +120,8 @@
   <div class="card">
     <h2>New Session</h2>
     <div class="input-row">
-      <input type="text" id="repoUrl" placeholder="https://github.com/user/repo" autocomplete="off" style="flex:2;min-width:250px">
-      <input type="text" id="branch" placeholder="Branch (optional)" autocomplete="off" style="flex:1;min-width:120px">
+      <input type="text" id="repoUrl" placeholder="https://github.com/user/repo.git" autocomplete="off" style="flex:2;min-width:250px" required>
+      <input type="text" id="branch" placeholder="Branch (e.g. main)" autocomplete="off" style="flex:1;min-width:120px" required>
       <button class="btn btn-primary" id="spinBtn" onclick="spinUp()">Spin Up Agent</button>
     </div>
   </div>
@@ -167,14 +167,16 @@ function toast(msg, type) {
 async function spinUp() {
   const url = repoUrl.value.trim();
   if (!url) { toast('Enter a repo URL', 'error'); return; }
+  if (!/\.git(?:\/?|#.*)?$/i.test(url)) {
+    toast('Repo URL must end in .git', 'error'); return;
+  }
   const branch = branchInput.value.trim();
+  if (!branch) { toast('Enter a branch', 'error'); return; }
   spinBtn.disabled = true; spinBtn.innerHTML = '<span class="spinner"></span>Spinning...';
   try {
-    const body = {repo_url: url};
-    if (branch) body.branch = branch;
     const res = await fetch('/api/spin-up', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
+      body: JSON.stringify({ repo_url: url, branch: branch }),
     });
     const data = await res.json();
     if (!res.ok) { toast(data.error || 'Failed', 'error'); }
