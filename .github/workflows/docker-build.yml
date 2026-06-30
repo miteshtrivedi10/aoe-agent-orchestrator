@@ -25,36 +25,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Clean up existing GHCR images
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PACKAGE_NAME=$(echo "${{ env.IMAGE_NAME }}" | cut -d'/' -f2)
-          echo "::group::Listing existing package versions for $PACKAGE_NAME"
-          VERSIONS_JSON=$(gh api \
-            -H "Accept: application/vnd.github+json" \
-            "/user/packages/container/$PACKAGE_NAME/versions" \
-            2>/dev/null || true)
-
-          if [ -z "$VERSIONS_JSON" ] || [ "$VERSIONS_JSON" = "[]" ]; then
-            echo "No existing versions found, skipping cleanup."
-            echo "::endgroup::"
-            exit 0
-          fi
-
-          VERSION_IDS=$(echo "$VERSIONS_JSON" | jq -r '.[].id')
-          echo "Found versions: $(echo "$VERSION_IDS" | wc -l)"
-          echo "::endgroup::"
-
-          for VERSION_ID in $VERSION_IDS; do
-            echo "Deleting version $VERSION_ID..."
-            gh api --method DELETE \
-              -H "Accept: application/vnd.github+json" \
-              "/user/packages/container/$PACKAGE_NAME/versions/$VERSION_ID?force=true" \
-              --silent || echo "  (skip - may be in use)"
-          done
-          echo "Cleanup complete."
-
       - name: Build and push (no cache)
         uses: docker/build-push-action@v6
         with:
@@ -62,3 +32,53 @@ jobs:
           push: true
           no-cache: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      # Run AFTER a successful build so the previous :latest stays around as a
+      # safety net if the new build breaks. After this step finishes there is
+      # at most one version in the registry: the just-built :latest.
+      - name: Prune GHCR — keep only :latest
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER_REPO: ${{ github.repository }}
+          PACKAGE_NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          OWNER=$(echo "$OWNER_REPO" | cut -d'/' -f1)
+          REPO=$(echo "$OWNER_REPO" | cut -d'/' -f2)
+          PKG=$(echo "$PACKAGE_NAME" | cut -d'/' -f2)
+          ENDPOINT="/repos/${OWNER}/${REPO}/packages/container/${PKG}/versions"
+
+          echo "::group::Existing GHCR versions for ${PKG}"
+          VERSIONS_JSON=$(gh api -H "Accept: application/vnd.github+json" "$ENDPOINT")
+          echo "$VERSIONS_JSON" | jq '[.[] | {id, tags: .metadata.container.tags}]'
+          echo "::endgroup::"
+
+          # Find the version ID that currently carries the :latest tag — that's
+          # the one the build step just produced (or, if a replace failed, the
+          # previous good one we want to keep).
+          KEEP_ID=$(echo "$VERSIONS_JSON" | \
+            jq -r '[.[] | select((.metadata.container.tags // []) | index("latest"))][0].id // empty')
+
+          if [ -z "$KEEP_ID" ]; then
+            echo "::error::No version tagged :latest found — refusing to prune anything."
+            exit 0
+          fi
+
+          # Everything else is stale.
+          PRUNE_IDS=$(echo "$VERSIONS_JSON" | \
+            jq -r --argjson KEEP "$KEEP_ID" '[.[] | select(.id != $KEEP) | .id] | .[]')
+
+          if [ -z "$PRUNE_IDS" ]; then
+            echo "Only :latest present, nothing to prune."
+            exit 0
+          fi
+
+          COUNT=$(echo "$PRUNE_IDS" | wc -l)
+          echo "Keeping version $KEEP_ID (tagged :latest); pruning $COUNT older version(s)."
+          for VID in $PRUNE_IDS; do
+            gh api --method DELETE \
+              -H "Accept: application/vnd.github+json" \
+              "$ENDPOINT/${VID}?force=true" --silent \
+              && echo "  pruned version $VID" \
+              || echo "  ✗ version $VID could not be deleted (may be in use); leaving in registry"
+          done
