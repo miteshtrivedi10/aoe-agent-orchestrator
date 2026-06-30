@@ -490,15 +490,6 @@ async function runDeviceAuth() {
           log(`_run_device_auth kilo remote spawn failed: ${e.message}`);
         }
       }
-
-      try {
-        const profile = execFileSync("kilo", ["profile", "--json"], {
-          encoding: "utf8", timeout: 10000,
-        });
-        log(`_run_device_auth profile: ${profile.trim().slice(0, 300)}`);
-      } catch (e) {
-        log(`_run_device_auth profile check failed: ${e.message}`);
-      }
     }
 
     if (DEVICE_AUTH.status === "pending") {
