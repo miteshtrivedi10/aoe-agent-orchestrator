@@ -44,9 +44,14 @@ jobs:
           PACKAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
           OWNER=$(echo "$OWNER_REPO" | cut -d'/' -f1)
-          REPO=$(echo "$OWNER_REPO" | cut -d'/' -f2)
           PKG=$(echo "$PACKAGE_NAME" | cut -d'/' -f2)
-          ENDPOINT="/repos/${OWNER}/${REPO}/packages/container/${PKG}/versions"
+
+          # Container packages on GHCR are owned by the user/org that owns the
+          # <owner> prefix of the image path, NOT the repo that produces them.
+          # `ghcr.io/miteshtrivedi10/aoe-agent-orchestrator` lives under
+          # /users/miteshtrivedi10/packages/container/aoe-agent-orchestrator,
+          # so /repos/.../packages/... is the wrong path and 404s.
+          ENDPOINT="/users/${OWNER}/packages/container/${PKG}/versions"
 
           echo "::group::Existing GHCR versions for ${PKG}"
           VERSIONS_JSON=$(gh api -H "Accept: application/vnd.github+json" "$ENDPOINT")
