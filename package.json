@@ -2,6 +2,9 @@
   "name": "hermes-cloud",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "test": "node --test tests/logger.test.js tests/auth.test.js tests/sessions.test.js tests/kilo.test.js"
+  },
   "dependencies": {
     "express": "^4.21.0",
     "express-rate-limit": "^7.5.1",

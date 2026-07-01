@@ -13,6 +13,14 @@ rm -rf /root/.config/kilo /root/.local/share/kilo
 ln -sf /data/kilo /root/.config/kilo
 ln -sf /data/kilo /root/.local/share/kilo
 
+# Kill any zombie kilo processes from previous restarts
+# (HF Space persistent storage preserves processes across restarts sometimes,
+# and old kilo daemon/remote/serve/TUI processes can conflict with new ones)
+# pkill -x matches process name exactly — kills all kilo-* executables
+echo "=== Cleaning up zombie kilo processes ==="
+pkill -x kilo 2>/dev/null || true
+sleep 1
+
 echo "=== HERMES-CLOUD ENTRYPOINT ==="
 
 # Start NodeJS server — handles auth, daemon, remote, and HTTP
