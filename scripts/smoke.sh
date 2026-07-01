@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke tests for hermes-cloud auth + rate-limit behavior.
+# Smoke tests for agent-dock auth + rate-limit behavior.
 # Starts server.js in test mode (rate limits off, sandbox data dir), then
 # exercises a representative subset of endpoints.
 set -euo pipefail

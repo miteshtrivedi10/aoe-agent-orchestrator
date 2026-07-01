@@ -16,7 +16,7 @@ describe("sessions", () => {
 
   beforeEach(() => {
     mock.method(console, "log", () => {});
-    tmpDir = fs.mkdtempSync("/tmp/hermes-sessions-test-");
+    tmpDir = fs.mkdtempSync("/tmp/agent-dock-sessions-test-");
     // Override SESSIONS_FILE and REPOS_DIR by writing to the actual paths
     // and using mkdir. Since these are constants, we mock fs ops.
     sessions = reloadSessions();

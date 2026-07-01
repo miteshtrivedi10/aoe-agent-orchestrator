@@ -66,7 +66,7 @@ describe("server", () => {
     const origReadFileSync = fs.readFileSync;
     mock.method(fs, "readFileSync", (fp, ...args) => {
       if (fp && fp.toString().includes("templates/index.html")) {
-        return "<html><script>window.__HERMES_TOKEN__=\"\";</script></html>";
+        return "<html><script>window.__AGENT_DOCK_TOKEN__=\"\";</script></html>";
       }
       return origReadFileSync(fp, ...args);
     });
@@ -80,9 +80,9 @@ describe("server", () => {
     global.fetch = mock.fn(() => Promise.resolve({ status: 200 }));
 
     const app = reloadServer({
-      HERMES_API_TOKEN: "test-server-token",
-      HERMES_RATE_LIMIT: "off",
-      HERMES_DEFAULT_MODEL: "kilo/kilo-auto/free",
+      AGENT_DOCK_API_TOKEN: "test-server-token",
+      AGENT_DOCK_RATE_LIMIT: "off",
+      AGENT_DOCK_DEFAULT_MODEL: "kilo/kilo-auto/free",
     });
 
     // server.js calls app.listen(0, "0.0.0.0", cb) with PORT=0, which picks a
@@ -112,7 +112,7 @@ describe("server", () => {
     it("returns HTML", async () => {
       const res = await req(baseUrl, "GET", "/");
       assert.equal(res.status, 200);
-      assert.ok(res.body.includes("__HERMES_TOKEN__"));
+      assert.ok(res.body.includes("__AGENT_DOCK_TOKEN__"));
     });
   });
 
@@ -450,17 +450,17 @@ describe("server", () => {
     });
   });
 
-  describe("X-Hermes-Token auth", () => {
+  describe("X-Agent-Dock-Token auth", () => {
     it("works for gated endpoints", async () => {
       const res = await req(baseUrl, "GET", "/api/sessions", {
-        "X-Hermes-Token": "test-server-token",
+        "X-Agent-Dock-Token": "test-server-token",
       });
       assert.equal(res.status, 200);
     });
 
-    it("rejects wrong X-Hermes-Token", async () => {
+    it("rejects wrong X-Agent-Dock-Token", async () => {
       const res = await req(baseUrl, "GET", "/api/sessions", {
-        "X-Hermes-Token": "wrong-token",
+        "X-Agent-Dock-Token": "wrong-token",
       });
       assert.equal(res.status, 403);
     });

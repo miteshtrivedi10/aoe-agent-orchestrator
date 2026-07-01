@@ -52,7 +52,7 @@ log(`boot kilo version=${KILO_VERSION} which=${KILO_WHICH || "not found"} (cache
 app.get("/", (_req, res) => {
   if (!INDEX_HTML) return res.status(500).send("index.html unavailable");
   const safe = API_TOKEN.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const html = INDEX_HTML.replace('<script>window.__HERMES_TOKEN__="";</script>', `<script>window.__HERMES_TOKEN__="${safe}";</script>`);
+  const html = INDEX_HTML.replace('<script>window.__AGENT_DOCK_TOKEN__="";</script>', `<script>window.__AGENT_DOCK_TOKEN__="${safe}";</script>`);
   res.set("Content-Type", "text/html; charset=utf-8");
   res.send(html);
 });
@@ -373,7 +373,7 @@ app.post("/api/sessions/:id/continue", authGate, writeLimiter, (req, res) => {
     return res.status(409).json({ error: "session is still running" });
   }
 
-  const model = process.env.HERMES_DEFAULT_MODEL || "kilo/kilo-auto/free";
+  const model = process.env.AGENT_DOCK_DEFAULT_MODEL || "kilo/kilo-auto/free";
   const args = [
     "run",
     prompt,
@@ -438,8 +438,8 @@ app.post("/api/sessions/:id/resume", authGate, writeLimiter, (req, res) => {
     });
   }
 
-  const prompt = (req.body?.prompt || "").trim() || process.env.HERMES_INITIAL_PROMPT || "continue";
-  const model = process.env.HERMES_DEFAULT_MODEL || "kilo/kilo-auto/free";
+  const prompt = (req.body?.prompt || "").trim() || process.env.AGENT_DOCK_INITIAL_PROMPT || "continue";
+  const model = process.env.AGENT_DOCK_DEFAULT_MODEL || "kilo/kilo-auto/free";
   const args = [
     "run",
     prompt,

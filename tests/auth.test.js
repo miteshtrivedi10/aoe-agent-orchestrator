@@ -23,10 +23,10 @@ describe("auth", () => {
 
   beforeEach(() => {
     mock.method(console, "log", () => {});
-    tmpDir = fs.mkdtempSync("/tmp/hermes-auth-test-");
+    tmpDir = fs.mkdtempSync("/tmp/agent-dock-auth-test-");
     auth = reloadAuth({
-      HERMES_API_TOKEN: "test-token-for-auth",
-      HERMES_RATE_LIMIT: "off",
+      AGENT_DOCK_API_TOKEN: "test-token-for-auth",
+      AGENT_DOCK_RATE_LIMIT: "off",
     });
   });
 
@@ -45,7 +45,7 @@ describe("auth", () => {
     });
 
     it("generates API_TOKEN when env not set", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: undefined });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: undefined });
       assert.equal(a.TOKEN_IS_AUTOGEN, true);
       assert.ok(a.API_TOKEN.length >= 32);
     });
@@ -55,7 +55,7 @@ describe("auth", () => {
     });
 
     it("RATE_LIMIT_DISABLED is false when not set", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x", HERMES_RATE_LIMIT: undefined });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x", AGENT_DOCK_RATE_LIMIT: undefined });
       assert.equal(a.RATE_LIMIT_DISABLED, false);
     });
 
@@ -65,12 +65,12 @@ describe("auth", () => {
   });
 
   describe("authGate", () => {
-    function makeReq(authHeader, xHermesToken) {
+    function makeReq(authHeader, agentDockToken) {
       const headers = {};
       return {
         get: (name) => {
           if (name === "authorization") return authHeader || undefined;
-          if (name === "x-hermes-token") return xHermesToken || undefined;
+          if (name === "x-agent-dock-token") return agentDockToken || undefined;
           return undefined;
         },
       };
@@ -122,7 +122,7 @@ describe("auth", () => {
       assert.equal(nextCalled, true);
     });
 
-    it("accepts X-Hermes-Token header", () => {
+    it("accepts X-Agent-Dock-Token header", () => {
       const req = makeReq(null, "test-token-for-auth");
       const res = makeRes();
       let nextCalled = false;
@@ -130,7 +130,7 @@ describe("auth", () => {
       assert.equal(nextCalled, true);
     });
 
-    it("X-Hermes-Token overrides missing Authorization", () => {
+    it("X-Agent-Dock-Token overrides missing Authorization", () => {
       const req = makeReq(null, "test-token-for-auth");
       const res = makeRes();
       let nextCalled = false;
@@ -147,7 +147,7 @@ describe("auth", () => {
       assert.equal(nextCalled, false);
     });
 
-    it("returns 401 for empty X-Hermes-Token with no Authorization", () => {
+    it("returns 401 for empty X-Agent-Dock-Token with no Authorization", () => {
       const req = makeReq(null, "");
       const res = makeRes();
       let nextCalled = false;
@@ -167,8 +167,8 @@ describe("auth", () => {
 
     it("returns rate-limit middleware when enabled", () => {
       const a = reloadAuth({
-        HERMES_API_TOKEN: "x",
-        HERMES_RATE_LIMIT: undefined,
+        AGENT_DOCK_API_TOKEN: "x",
+        AGENT_DOCK_RATE_LIMIT: undefined,
       });
       const fn = a.makeLimiter(60000, 10, "test");
       assert.equal(typeof fn, "function");
@@ -179,7 +179,7 @@ describe("auth", () => {
 
   describe("inspectAuth", () => {
     it("returns default result when no auth.json", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x" });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x" });
       const result = a.inspectAuth();
       assert.equal(result.valid, false);
       assert.equal(result.reason, "no auth.json found");
@@ -187,7 +187,7 @@ describe("auth", () => {
     });
 
     it("returns valid when KILO_API_KEY env is set and no auth.json", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x", KILO_API_KEY: "sk-test" });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x", KILO_API_KEY: "sk-test" });
       const result = a.inspectAuth();
       assert.equal(result.valid, true);
       assert.equal(result.reason, "ok (env-var KILO_API_KEY)");
@@ -211,7 +211,7 @@ describe("auth", () => {
     });
 
     it("parses oauth auth.json via mock", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x" });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x" });
       const fsMock = mock.method(fs, "statSync", () => ({ size: 200 }));
       const readMock = mock.method(fs, "readFileSync", () => JSON.stringify({
         kilo: { type: "oauth", access: "token-abc", refresh: "ref-xyz", expires: "2099-01-01T00:00:00Z" },
@@ -230,7 +230,7 @@ describe("auth", () => {
     });
 
     it("parses api auth.json", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x" });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x" });
       mock.method(fs, "statSync", () => ({ size: 200 }));
       mock.method(fs, "readFileSync", () => JSON.stringify({
         type: "api", key: "sk-test-key",
@@ -244,7 +244,7 @@ describe("auth", () => {
     });
 
     it("parses wellknown auth.json", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x" });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x" });
       mock.method(fs, "statSync", () => ({ size: 200 }));
       mock.method(fs, "readFileSync", () => JSON.stringify({
         kilo: { type: "wellknown", token: "wk-token" },
@@ -257,7 +257,7 @@ describe("auth", () => {
     });
 
     it("detects expired oauth", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x" });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x" });
       mock.method(fs, "statSync", () => ({ size: 200 }));
       mock.method(fs, "readFileSync", () => JSON.stringify({
         kilo: { type: "oauth", access: "expired-token", expires: "2020-01-01T00:00:00Z" },
@@ -270,7 +270,7 @@ describe("auth", () => {
     });
 
     it("handles unknown auth type", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x" });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x" });
       mock.method(fs, "statSync", () => ({ size: 200 }));
       mock.method(fs, "readFileSync", () => JSON.stringify({ kilo: { type: "custom" } }));
       const result = a.inspectAuth();
@@ -280,7 +280,7 @@ describe("auth", () => {
     });
 
     it("handles parse error", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x" });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x" });
       mock.method(fs, "statSync", () => ({ size: 200 }));
       mock.method(fs, "readFileSync", () => "not-json");
       const result = a.inspectAuth();
@@ -290,7 +290,7 @@ describe("auth", () => {
     });
 
     it("does NOT include token field for non-oauth types", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x" });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x" });
       mock.method(fs, "statSync", () => ({ size: 200 }));
       mock.method(fs, "readFileSync", () => JSON.stringify({ type: "api", key: "sk-test" }));
       const result = a.inspectAuth();
@@ -301,7 +301,7 @@ describe("auth", () => {
 
   describe("writeAuthJson", () => {
     it("writes api key to auth.json", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x", KILO_API_KEY: "sk-my-key" });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x", KILO_API_KEY: "sk-my-key" });
       const writeSpy = mock.method(fs, "writeFileSync", () => {});
       mock.method(fs, "statSync", () => { throw new Error("no file"); });
       a.writeAuthJson();
@@ -313,7 +313,7 @@ describe("auth", () => {
     });
 
     it("skips when no key env", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x", KILO_API_KEY: undefined, KILO_AUTH_TOKEN: undefined });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x", KILO_API_KEY: undefined, KILO_AUTH_TOKEN: undefined });
       const writeSpy = mock.method(fs, "writeFileSync", () => {});
       a.writeAuthJson();
       assert.equal(writeSpy.mock.callCount(), 0);
@@ -321,7 +321,7 @@ describe("auth", () => {
     });
 
     it("keeps existing auth.json when size > 10", () => {
-      const a = reloadAuth({ HERMES_API_TOKEN: "x", KILO_API_KEY: "sk-new" });
+      const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x", KILO_API_KEY: "sk-new" });
       mock.method(fs, "statSync", () => ({ size: 200 }));
       mock.method(fs, "readFileSync", () => JSON.stringify({ kilo: { type: "oauth", access: "keep" } }));
       const writeSpy = mock.method(fs, "writeFileSync", () => {});

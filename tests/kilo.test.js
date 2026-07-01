@@ -22,8 +22,8 @@ describe("kilo", () => {
 
   beforeEach(() => {
     mock.method(console, "log", () => {});
-    tmpDir = fs.mkdtempSync("/tmp/hermes-kilo-test-");
-    kilo = reloadKilo({ HERMES_API_TOKEN: "test", HERMES_RATE_LIMIT: "off" });
+    tmpDir = fs.mkdtempSync("/tmp/agent-dock-kilo-test-");
+    kilo = reloadKilo({ AGENT_DOCK_API_TOKEN: "test", AGENT_DOCK_RATE_LIMIT: "off" });
   });
 
   afterEach(() => {
@@ -71,12 +71,12 @@ describe("kilo", () => {
       mock.restoreAll();
     });
 
-    it("uses HERMES_DEFAULT_MODEL and HERMES_SMALL_MODEL env vars", () => {
+    it("uses AGENT_DOCK_DEFAULT_MODEL and AGENT_DOCK_SMALL_MODEL env vars", () => {
       const k = reloadKilo({
-        HERMES_API_TOKEN: "test",
-        HERMES_DEFAULT_MODEL: "kilo/kilo-auto/balanced",
-        HERMES_SMALL_MODEL: "kilo/kilo-auto/efficient",
-        HERMES_RATE_LIMIT: "off",
+        AGENT_DOCK_API_TOKEN: "test",
+        AGENT_DOCK_DEFAULT_MODEL: "kilo/kilo-auto/balanced",
+        AGENT_DOCK_SMALL_MODEL: "kilo/kilo-auto/efficient",
+        AGENT_DOCK_RATE_LIMIT: "off",
       });
       const writeSpy = mock.method(fs, "writeFileSync", () => {});
       mock.method(fs, "readFileSync", () => { throw new Error("ENOENT"); });

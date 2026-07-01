@@ -94,7 +94,7 @@
 <body>
 <div class="container">
   <header>
-    <h1>Hermes — Kilo Session Manager</h1>
+    <h1>Agent Dock</h1>
     <p>Spin up Kilo CLI sessions from any GitHub repo</p>
   </header>
 
@@ -159,14 +159,14 @@
 
 <div id="toast" class="toast"></div>
 
-<script>window.__HERMES_TOKEN__="";</script>
+<script>window.__AGENT_DOCK_TOKEN__="";</script>
 <script>
-const HERMES_HEADERS = (function() {
-  var t = window.__HERMES_TOKEN__;
+const AUTH_HEADERS = (function() {
+  var t = window.__AGENT_DOCK_TOKEN__;
   return (typeof t === "string" && t.length > 0) ? { Authorization: "Bearer " + t } : {};
 })();
 function authHeaders(extra) {
-  return Object.assign({}, HERMES_HEADERS, extra || {});
+  return Object.assign({}, AUTH_HEADERS, extra || {});
 }
 const repoUrl = document.getElementById('repoUrl');
 const branchInput = document.getElementById('branch');

@@ -37,7 +37,7 @@ describe("logger", () => {
     it("writes to LOG_RING and console.log", () => {
       logger.log("hello", "world");
       assert.equal(logger.LOG_RING.length, 1);
-      assert.match(logger.LOG_RING[0], /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} INFO \[hermes-cloud\] hello world/);
+      assert.match(logger.LOG_RING[0], /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} INFO \[agent-dock\] hello world/);
       assert.equal(consoleLogMock.mock.callCount(), 1);
     });
 

@@ -1,5 +1,5 @@
 ---
-title: Hermes
+title: Agent Dock
 emoji: 🏛️
 colorFrom: gray
 colorTo: yellow
@@ -10,7 +10,7 @@ pinned: false
 
 ## What this Space does
 
-Hermes is a web UI and REST API that orchestrates [Kilo CLI](https://kilo.ai)
+Agent Dock is a web UI and REST API that orchestrates [Kilo CLI](https://kilo.ai)
 sessions for the Cloud Dashboard at `https://app.kilo.ai/cloud`. Spin up an
 interactive PTY session from any Git repo — the session connects to the Cloud
 Dashboard via WebSocket relay, so you can send prompts from the Dashboard and
@@ -21,18 +21,18 @@ the API or the browser-based management UI at `GET /`.
 
 ```bash
 npm test                # run 99 regression tests
-docker build -t hermes .
-docker run -p 7860:7860 -e HERMES_API_TOKEN=... hermes
+docker build -t agent-dock .
+docker run -p 7860:7860 -e AGENT_DOCK_API_TOKEN=... agent-dock
 ```
 
 ## API security model
 
-- **Bearer-token auth** — every gated endpoint requires `Authorization: Bearer <HERMES_API_TOKEN>` or `X-Hermes-Token: <HERMES_API_TOKEN>`. Compared in constant time via `crypto.timingSafeEqual`.
-- **X-Hermes-Token fallback** — for use behind HF private-space proxy, which consumes the `Authorization` header for HF token auth.
+- **Bearer-token auth** — every gated endpoint requires `Authorization: Bearer <AGENT_DOCK_API_TOKEN>` or `X-Agent-Dock-Token: <AGENT_DOCK_API_TOKEN>`. Compared in constant time via `crypto.timingSafeEqual`.
+- **X-Agent-Dock-Token fallback** — for use behind HF private-space proxy, which consumes the `Authorization` header for HF token auth.
 - **Per-IP rate limits** — `express-rate-limit` with `trust proxy: 1`.
 - **Web UI token injection** — `GET /` embeds the token as `window.__HERMES_TOKEN__`. Only safe while the Space is private.
-- **Token bootstrap** — if `HERMES_API_TOKEN` is unset, a 48-char hex token is generated at boot (length logged, never the value).
-- **Rate-limit escape hatch** — set `HERMES_RATE_LIMIT=off` to disable all limiters.
+- **Token bootstrap** — if `AGENT_DOCK_API_TOKEN` is unset, a 48-char hex token is generated at boot (length logged, never the value).
+- **Rate-limit escape hatch** — set `AGENT_DOCK_RATE_LIMIT=off` to disable all limiters.
 
 ### Endpoint classification
 
@@ -59,11 +59,11 @@ docker run -p 7860:7860 -e HERMES_API_TOKEN=... hermes
 
 | Var | Default | Purpose |
 |---|---|---|
-| `HERMES_API_TOKEN` | auto-gen | Bearer token for gated endpoints |
-| `HERMES_RATE_LIMIT` | `on` | Set `off` to disable rate limits |
-| `HERMES_DEFAULT_MODEL` | `kilo/kilo-auto/free` | Model for sessions (set in `kilo.json`) |
-| `HERMES_SMALL_MODEL` | `kilo/kilo-auto/free` | Model for background tasks (titles, summaries) |
-| `HERMES_INITIAL_PROMPT` | `based on readme explain project in 2 lines` | Initial prompt sent on spin-up |
+| `AGENT_DOCK_API_TOKEN` | auto-gen | Bearer token for gated endpoints |
+| `AGENT_DOCK_RATE_LIMIT` | `on` | Set `off` to disable rate limits |
+| `AGENT_DOCK_DEFAULT_MODEL` | `kilo/kilo-auto/free` | Model for sessions (set in `kilo.json`) |
+| `AGENT_DOCK_SMALL_MODEL` | `kilo/kilo-auto/free` | Model for background tasks (titles, summaries) |
+| `AGENT_DOCK_INITIAL_PROMPT` | `based on readme explain project in 2 lines` | Initial prompt sent on spin-up |
 | `GITHUB_TOKEN` | – | Used for cloning private repos |
 | `KILO_API_KEY` | – | Kilo auth; written to `auth.json` on boot |
 
@@ -98,7 +98,7 @@ PTY stdout.
 
 - `inspectAuth()` returns metadata only — the token field is excluded from all HTTP responses and log output.
 - `sanitizeLog()` redacts JWT, Bearer tokens, GitHub tokens, and key/secret patterns before they reach the ring buffer.
-- Auto-generated `HERMES_API_TOKEN` is never logged; only its length.
+- Auto-generated `AGENT_DOCK_API_TOKEN` is never logged; only its length.
 - `GITHUB_TOKEN` in clone URLs is stripped from error messages before logging.
 - Docker logs and internal kilo logs are verified to contain zero JWT/token patterns.
 
