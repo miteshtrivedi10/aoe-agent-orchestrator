@@ -152,7 +152,15 @@
 
 <div id="toast" class="toast"></div>
 
+<script>window.__HERMES_TOKEN__="";</script>
 <script>
+const HERMES_HEADERS = (function() {
+  var t = window.__HERMES_TOKEN__;
+  return (typeof t === "string" && t.length > 0) ? { Authorization: "Bearer " + t } : {};
+})();
+function authHeaders(extra) {
+  return Object.assign({}, HERMES_HEADERS, extra || {});
+}
 const repoUrl = document.getElementById('repoUrl');
 const branchInput = document.getElementById('branch');
 const spinBtn = document.getElementById('spinBtn');
@@ -175,7 +183,7 @@ async function spinUp() {
   spinBtn.disabled = true; spinBtn.innerHTML = '<span class="spinner"></span>Spinning...';
   try {
     const res = await fetch('/api/spin-up', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
+      method: 'POST', headers: authHeaders({'Content-Type': 'application/json'}),
       body: JSON.stringify({ repo_url: url, branch: branch }),
     });
     const data = await res.json();
@@ -188,7 +196,7 @@ async function spinUp() {
 
 async function killSession(id) {
   try {
-    const res = await fetch('/api/kill/' + id, { method: 'POST' });
+    const res = await fetch('/api/kill/' + id, { method: 'POST', headers: authHeaders() });
     const data = await res.json();
     if (res.ok) toast('Session killed', 'success');
     else toast(data.error || 'Failed', 'error');
@@ -198,7 +206,7 @@ async function killSession(id) {
 
 async function loadSessions() {
   try {
-    const res = await fetch('/api/sessions');
+    const res = await fetch('/api/sessions', { headers: authHeaders() });
     const sessions = await res.json();
     if (sessions.length === 0) {
       sessionsList.innerHTML = '<div class="empty">No sessions yet. Spin one up above.</div>';
@@ -256,7 +264,7 @@ async function loadDiag() {
 
 async function loadLogs() {
   try {
-    const res = await fetch('/api/logs?n=100');
+    const res = await fetch('/api/logs?n=100', { headers: authHeaders() });
     const d = await res.json();
     const el = document.getElementById('logPanel');
     el.innerHTML = d.lines.reverse().map(l => esc(l)).join('\n');

@@ -23,6 +23,9 @@ const REPOS_DIR = "/data/repos";
 try { fs.mkdirSync(path.dirname(SESSIONS_FILE), { recursive: true }); } catch (_) {}
 try { fs.mkdirSync(REPOS_DIR, { recursive: true }); } catch (_) {}
 
+let INDEX_HTML = "";
+try { INDEX_HTML = fs.readFileSync(path.join(__dirname, "templates", "index.html"), "utf8"); } catch (_) {}
+
 const LOG_RING = [];
 const LOG_RING_MAX = 500;
 
@@ -61,11 +64,22 @@ if (TOKEN_IS_AUTOGEN) {
 if (RATE_LIMIT_DISABLED) log("boot HERMES_RATE_LIMIT=off — rate limits disabled (test mode only)");
 
 function authGate(req, res, next) {
-  const hdr = req.get("authorization") || "";
+  const hdr = req.get("authorization");
+  if (!hdr) {
+    res.set("WWW-Authenticate", 'Bearer realm="hermes-cloud"');
+    return res.status(401).json({
+      error: "missing Authorization header",
+      hint: "send: Authorization: Bearer <HERMES_API_TOKEN>",
+    });
+  }
   const m = /^Bearer\s+(.+)$/i.exec(hdr);
   if (!m) {
     res.set("WWW-Authenticate", 'Bearer realm="hermes-cloud"');
-    return res.status(401).json({ error: "missing bearer token" });
+    return res.status(401).json({
+      error: "Authorization header is not a Bearer token",
+      received_scheme: hdr.split(/\s+/)[0],
+      hint: "must be: Authorization: Bearer <HERMES_API_TOKEN>",
+    });
   }
   const a = Buffer.from(m[1]);
   const b = Buffer.from(API_TOKEN);
@@ -320,14 +334,20 @@ async function startKiloSession(workDir, label) {
   // relays them to ingest.kilosessions.ai before we return the PID.
   // NOTE: kilo session list is project-scoped — must be probed from project cwd.
   await sleep(3000);
+  let cloudSessionId = null;
   try {
     const sl = execFileSync("kilo", ["session", "list"], { encoding: "utf8", timeout: 5000, cwd: workDir });
     log(`_start_kilo_session ${logPrefix(label)} session list probe:\n${sl.split("\n").slice(0, 5).join("\n")}`);
+    const m = sl.match(/ses_[a-z0-9]+/);
+    if (m) {
+      cloudSessionId = m[0];
+      log(`_start_kilo_session ${logPrefix(label)} captured cloud_session_id=${cloudSessionId}`);
+    }
   } catch (e) {
     log(`_start_kilo_session ${logPrefix(label)} session list probe failed: ${e.message}`);
   }
 
-  return pid;
+  return { pid, cloudSessionId };
 }
 
 function checkoutRepo(repoUrl, branch, sessionId) {
@@ -506,7 +526,11 @@ async function runDeviceAuth() {
 // ── Routes ───────────────────────────────────────────────────────
 
 app.get("/", (_req, res) => {
-  res.sendFile(path.join(__dirname, "templates", "index.html"));
+  if (!INDEX_HTML) return res.status(500).send("index.html unavailable");
+  const safe = API_TOKEN.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const html = INDEX_HTML.replace('<script>window.__HERMES_TOKEN__="";</script>', `<script>window.__HERMES_TOKEN__="${safe}";</script>`);
+  res.set("Content-Type", "text/html; charset=utf-8");
+  res.send(html);
 });
 
 app.get("/api/status", (_req, res) => {
@@ -751,12 +775,13 @@ app.post("/api/spin-up", authGate, writeLimiter, async (req, res) => {
     return res.status(500).json({ error: "clone failed \u2014 check repo URL and access permissions" });
   }
 
-  let kiloPid;
+  let result;
   try {
-    kiloPid = await startKiloSession(workDir, label);
+    result = await startKiloSession(workDir, label);
   } catch (e) {
     return res.status(500).json({ error: `session start failed: ${e.message}` });
   }
+  const { pid: kiloPid, cloudSessionId } = result;
 
   const session = {
     id: sessionId,
@@ -765,6 +790,7 @@ app.post("/api/spin-up", authGate, writeLimiter, async (req, res) => {
     branch,
     work_dir: workDir,
     pid: kiloPid,
+    cloud_session_id: cloudSessionId || null,
     status: "running",
     started_at: new Date().toISOString(),
   };
