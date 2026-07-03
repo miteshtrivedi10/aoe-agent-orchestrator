@@ -37,6 +37,7 @@ COPY server.js /app/
 COPY lib/ /app/lib/
 COPY templates/ /app/templates/
 COPY entrypoint.sh /app/entrypoint.sh
+COPY kilo.jsonc /app/kilo.jsonc
 
 RUN chmod +x /app/entrypoint.sh
 

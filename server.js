@@ -14,7 +14,7 @@ const {
   REPOS_DIR, GIT_URL_RE, BRANCH_RE,
   loadSessions, saveSessions, updateStatus, terminateProcess, checkoutRepo, repoName,
 } = require("./lib/sessions");
-const { startKiloSession, initKiloStartup, scanInternalLogs, sendPromptToLive, isLive } = require("./lib/kilo");
+const { startKiloSession, resumeKiloSession, initKiloStartup, scanInternalLogs, sendPromptToLive, isLive, writeProjectConfig } = require("./lib/kilo");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -373,7 +373,6 @@ app.post("/api/sessions/:id/continue", authGate, writeLimiter, (req, res) => {
     return res.status(409).json({ error: "session is still running" });
   }
 
-  const model = process.env.AGENT_DOCK_DEFAULT_MODEL || "kilo/kilo-auto/free";
   const args = [
     "run",
     prompt,
@@ -382,12 +381,12 @@ app.post("/api/sessions/:id/continue", authGate, writeLimiter, (req, res) => {
     "--cloud-fork",
     "--share",
     "--dangerously-skip-permissions",
-    "--model", model,
     "--print-logs",
     "--log-level", "INFO",
   ];
 
   const label = req.params.id;
+  writeProjectConfig(session.work_dir, label);
   const logFile = path.join(KILO_DIR, `session-${label}-cont-${Date.now()}.log`);
   log(`_continue_session ${logPrefix(label)} cloud_id=${session.cloud_session_id} running: kilo ${args.join(" ")}`);
   const logFd = fs.openSync(logFile, "a");
@@ -415,7 +414,7 @@ app.post("/api/sessions/:id/continue", authGate, writeLimiter, (req, res) => {
   });
 });
 
-app.post("/api/sessions/:id/resume", authGate, writeLimiter, (req, res) => {
+app.post("/api/sessions/:id/resume", authGate, writeLimiter, async (req, res) => {
   const sessions = loadSessions();
   const session = sessions.find((s) => s.id === req.params.id);
   if (!session) {
@@ -438,59 +437,28 @@ app.post("/api/sessions/:id/resume", authGate, writeLimiter, (req, res) => {
     });
   }
 
-  const prompt = (req.body?.prompt || "").trim() || process.env.AGENT_DOCK_INITIAL_PROMPT || "continue";
-  const model = process.env.AGENT_DOCK_DEFAULT_MODEL || "kilo/kilo-auto/free";
-  const args = [
-    "run",
-    prompt,
-    "--dir", session.work_dir,
-    "--session", session.cloud_session_id,
-    "--cloud-fork",
-    "--share",
-    "--dangerously-skip-permissions",
-    "--model", model,
-    "--print-logs",
-    "--log-level", "INFO",
-  ];
-
   const label = req.params.id;
-  const logFile = path.join(KILO_DIR, `session-${label}-resume-${Date.now()}.log`);
-  log(`_resume_session ${logPrefix(label)} cloud_id=${session.cloud_session_id} running: kilo ${args.join(" ")}`);
-  const logFd = fs.openSync(logFile, "a");
-  const child = spawn("kilo", args, {
-    cwd: session.work_dir,
-    env: { ...process.env, KILO_REMOTE: "1" },
-    stdio: ["ignore", logFd, logFd],
-    detached: true,
-  });
-  child.unref();
 
-  child.on("exit", (code) => {
-    log(`_monitor_resume ${logPrefix(label)} kilo run exited code=${code}`);
-    const all = loadSessions();
-    for (const s of all) {
-      if (s.id === label && s.status === "running") {
-        s.status = "stopped";
-        s.stopped_at = new Date().toISOString();
-        s.exit_code = code;
-      }
-    }
-    saveSessions(all);
-  });
+  let result;
+  try {
+    result = await resumeKiloSession(session.work_dir, label, session.cloud_session_id);
+  } catch (e) {
+    return res.status(500).json({ error: `resume failed: ${e.message}` });
+  }
+  const { pid, cloudSessionId } = result;
 
   session.status = "running";
-  session.pid = child.pid;
+  session.pid = pid;
+  session.cloud_session_id = cloudSessionId || session.cloud_session_id;
   session.started_at = new Date().toISOString();
   session.resume_count = (session.resume_count || 0) + 1;
-  session.resume_log = logFile;
   saveSessions(sessions);
 
   return res.status(202).json({
     session_id: label,
     cloud_session_id: session.cloud_session_id,
-    pid: child.pid,
-    log_file: logFile,
-    prompt_excerpt: prompt.slice(0, 200),
+    pid,
+    status: "running",
   });
 });
 

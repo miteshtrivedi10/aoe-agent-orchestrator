@@ -349,20 +349,21 @@ describe("server", () => {
       assert.equal(res.status, 409);
     });
 
-    it("spawns kilo run for resume", async () => {
+    it("respawns TUI PTY via resumeKiloSession", async () => {
       mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
         { id: "test-resume", status: "paused", cloud_session_id: "ses_abc", work_dir: "/tmp/test" },
       ]);
       mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
-      mock.method(fs, "openSync", () => 999);
-      mock.method(fs, "closeSync", () => {});
       mock.method(fs, "existsSync", () => true);
+      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "resumeKiloSession", () => Promise.resolve({ pid: 12345 }));
 
       const res = await req(baseUrl, "POST", "/api/sessions/test-resume/resume", {
         "Authorization": "Bearer test-server-token",
-      }, { prompt: "resume work" });
+      });
       assert.equal(res.status, 202);
       assert.equal(res.body.cloud_session_id, "ses_abc");
+      assert.equal(res.body.pid, 12345);
+      assert.equal(res.body.status, "running");
     });
   });
 

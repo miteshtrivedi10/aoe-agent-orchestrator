@@ -1,0 +1,43 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "small_model": "kilo/kilo-auto/free",
+  "indexing": {
+    "enabled": true,
+    "provider": "openai-compatible",
+    "gemini": {
+      "apiKey": "{env:GEMINI_API_KEY}"
+    },
+    "embeddingBatchSize": 60,
+    "searchMaxResults": 30,
+    "scannerMaxBatchRetries": 3,
+    "searchMinScore": 0.55,
+    "openai-compatible": {
+      "baseUrl": "https://api.jina.ai/v1",
+      "apiKey": "{env:JINA_API_KEY}"
+    },
+    "model": "jina-embeddings-v5-text-small",
+    "dimension": 1024
+  },
+  "permission": {
+    "bash": {
+      "*": "allow",
+      "curl *": "allow",
+      "tail *": "allow"
+    }
+  },
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
+      },
+      "enabled": true
+    },
+    "parallel_search": {
+      "type": "remote",
+      "url": "https://search.parallel.ai/mcp",
+      "enabled": true
+    }
+  }
+}

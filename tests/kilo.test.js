@@ -61,29 +61,19 @@ describe("kilo", () => {
   });
 
   describe("writeDefaultModel", () => {
-    it("sets model and small_model to defaults", () => {
+    it("does not write model to global config (no-op, lets dashboard control model)", () => {
       const writeSpy = mock.method(fs, "writeFileSync", () => {});
-      mock.method(fs, "readFileSync", () => { throw new Error("ENOENT"); });
       kilo.writeDefaultModel();
-      const parsed = JSON.parse(writeSpy.mock.calls[0].arguments[1]);
-      assert.equal(parsed.model, "kilo/kilo-auto/free");
-      assert.equal(parsed.small_model, "kilo/kilo-auto/free");
+      assert.equal(writeSpy.mock.calls.length, 0);
       mock.restoreAll();
     });
 
-    it("uses AGENT_DOCK_DEFAULT_MODEL and AGENT_DOCK_SMALL_MODEL env vars", () => {
-      const k = reloadKilo({
-        AGENT_DOCK_API_TOKEN: "test",
-        AGENT_DOCK_DEFAULT_MODEL: "kilo/kilo-auto/balanced",
-        AGENT_DOCK_SMALL_MODEL: "kilo/kilo-auto/efficient",
-        AGENT_DOCK_RATE_LIMIT: "off",
-      });
+    it("does not read or write any config files", () => {
+      const readSpy = mock.method(fs, "readFileSync", () => { throw new Error("should not be called"); });
       const writeSpy = mock.method(fs, "writeFileSync", () => {});
-      mock.method(fs, "readFileSync", () => { throw new Error("ENOENT"); });
-      k.writeDefaultModel();
-      const parsed = JSON.parse(writeSpy.mock.calls[0].arguments[1]);
-      assert.equal(parsed.model, "kilo/kilo-auto/balanced");
-      assert.equal(parsed.small_model, "kilo/kilo-auto/efficient");
+      kilo.writeDefaultModel();
+      assert.equal(readSpy.mock.calls.length, 0);
+      assert.equal(writeSpy.mock.calls.length, 0);
       mock.restoreAll();
     });
   });
