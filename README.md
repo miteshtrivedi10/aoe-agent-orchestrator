@@ -74,6 +74,7 @@ in any container orchestrator.
 | `GITHUB_TOKEN` | Clone private repos + authenticate `git push` to github.com. | optional* |
 | `CONTEXT7_API_KEY` | `context7` MCP server header. | optional |
 | `OPENROUTER_API_KEY` | OpenRouter provider (model access). | optional |
+| `OPENCODE_API_KEY` | OpenCode provider (zen/v1, model access). | optional |
 | `GEMINI_API_KEY` | Gemini embedding provider for indexing. | optional |
 | `JINA_API_KEY` | Jina openai-compatible embedding provider for indexing. | optional |
 
@@ -82,7 +83,7 @@ in any container orchestrator.
 ### Example: single JSON blob (`HF_SECRETS`)
 ```bash
 docker run -p 7860:7860 \
-  -e HF_SECRETS='{"AGENT_DOCK_API_TOKEN":"...","KILO_API_KEY":"...","GITHUB_TOKEN":"ghp_...","CONTEXT7_API_KEY":"ctx7sk-...","OPENROUTER_API_KEY":"sk-or-...","GEMINI_API_KEY":"AIza...","JINA_API_KEY":"jina_..."}' \
+  -e HF_SECRETS='{"AGENT_DOCK_API_TOKEN":"...","KILO_API_KEY":"...","GITHUB_TOKEN":"ghp_...","CONTEXT7_API_KEY":"ctx7sk-...","OPENROUTER_API_KEY":"sk-or-...","OPENCODE_API_KEY":"...","GEMINI_API_KEY":"AIza...","JINA_API_KEY":"jina_..."}' \
   agent-dock
 ```
 
