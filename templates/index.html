@@ -955,11 +955,11 @@ async function loadSessions() {
       }
 
       html += '<tr>' +
-              '<td><div class="repo">' + esc(s.repo_name) + '</div><div class="url">' + esc(s.repo_url) + '</div></td>' +
-              '<td style="color:#94a3b8;font-size:0.85rem">' + esc(s.branch || 'default') + '</td>' +
-              '<td style="color:#94a3b8;font-size:0.85rem">' + timeAgo(s.started_at) + '</td>' +
-              '<td><span class="' + dotClass + '"></span><span class="badge ' + badgeClass + '">' + esc(status) + '</span></td>' +
-              '<td style="text-align:right">' + actions + '</td>' +
+              '<td data-label="Repository"><div class="repo-name">' + esc(s.repo_name) + '</div><div class="repo-url">' + esc(s.repo_url) + '</div></td>' +
+              '<td data-label="Branch" style="color:var(--text-secondary);font-size:0.85rem">' + esc(s.branch || 'default') + '</td>' +
+              '<td data-label="Started" style="color:var(--text-secondary);font-size:0.85rem">' + timeAgo(s.started_at) + '</td>' +
+              '<td data-label="Status"><span class="' + dotClass + '"></span><span class="badge ' + badgeClass + '">' + esc(status) + '</span></td>' +
+              '<td data-label="Actions" style="text-align:right">' + actions + '</td>' +
               '</tr>';
     }
     html += '</tbody></table>';
