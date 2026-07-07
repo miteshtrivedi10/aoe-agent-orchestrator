@@ -552,7 +552,7 @@ tr:last-child td { border-bottom: none; }
       <span class="nav-icon">≡</span> Logs
     </button>
     <button type="button" class="nav-item" data-target="auth" onclick="navigateTo('auth')">
-      <span class="nav-icon">🔒</span> Auth
+      <span class="nav-icon" id="authNavIcon">🔓</span> Auth
     </button>
   </nav>
 
@@ -730,9 +730,14 @@ function closeSidebar() {
 function updateSidebarAuth(status) {
   const dot = document.getElementById('sidebarAuthDot');
   const text = document.getElementById('sidebarAuthText');
-  if (!dot || !text) return;
-  dot.className = 'auth-pill-dot ' + (status === 'success' ? 'authenticated' : status === 'pending' ? 'pending' : '');
-  text.textContent = status === 'success' ? 'Authenticated' : status === 'pending' ? 'Auth pending' : 'Not authenticated';
+  const navIcon = document.getElementById('authNavIcon');
+  if (dot && text) {
+    dot.className = 'auth-pill-dot ' + (status === 'success' ? 'authenticated' : status === 'pending' ? 'pending' : '');
+    text.textContent = status === 'success' ? 'Authenticated' : status === 'pending' ? 'Auth pending' : 'Not authenticated';
+  }
+  if (navIcon) {
+    navIcon.textContent = status === 'success' ? '🔒' : '🔓';
+  }
 }
 
 const AUTH_HEADERS = (function() {
