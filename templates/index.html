@@ -533,69 +533,141 @@ tr:last-child td { border-bottom: none; }
 </style>
 </head>
 <body>
-<div class="container">
-  <header>
-    <h1>Agent Dock</h1>
-    <p>Spin up Kilo CLI sessions from any GitHub repo</p>
+<div class="overlay" id="overlay" onclick="closeSidebar()"></div>
+
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <div class="brand">
+      <div class="brand-icon">A</div>
+      Agent Dock
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <button class="nav-item active" data-target="new-session" onclick="navigateTo('new-session')">
+      <span class="nav-icon">+</span> New Session
+    </button>
+    <button class="nav-item" data-target="sessions" onclick="navigateTo('sessions')">
+      <span class="nav-icon">◎</span> Sessions
+    </button>
+    <button class="nav-item" data-target="diagnostics" onclick="navigateTo('diagnostics')">
+      <span class="nav-icon">◈</span> Diagnostics
+    </button>
+    <button class="nav-item" data-target="logs" onclick="navigateTo('logs')">
+      <span class="nav-icon">≡</span> Logs
+    </button>
+    <button class="nav-item" data-target="auth" onclick="navigateTo('auth')">
+      <span class="nav-icon">🔒</span> Auth
+    </button>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="auth-pill" id="sidebarAuthPill">
+      <span class="auth-pill-dot" id="sidebarAuthDot"></span>
+      <span id="sidebarAuthText">Checking auth…</span>
+    </div>
+    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()">🌙 Dark</button>
+  </div>
+</aside>
+
+<div class="main">
+  <header class="topbar">
+    <button class="menu-btn" onclick="openSidebar()">☰</button>
+    <div class="brand" style="font-size:1rem">
+      <div class="brand-icon" style="width:28px;height:28px;font-size:0.85rem">A</div>
+      Agent Dock
+    </div>
+    <div style="width:28px"></div>
   </header>
 
-  <div class="card" id="authCard" style="display:none; border-color:#f59e0b">
-    <h2>Kilo Gateway Authentication</h2>
-    <p style="color:#94a3b8;font-size:0.9rem;margin-bottom:1rem">
-      Authenticate with the Kilo Gateway to enable session relay to the Cloud Dashboard.
-    </p>
-    <div id="authStatus" style="margin-bottom:1rem;font-size:0.9rem"></div>
-    <div id="authFlow" style="display:none">
-      <div style="background:#0f172a;border-radius:8px;padding:1.25rem;margin-bottom:1rem;text-align:center">
-        <p style="color:#94a3b8;font-size:0.85rem;margin-bottom:0.75rem">Open this URL in your browser:</p>
-        <a id="authUrl" href="#" target="_blank" style="color:#6366f1;font-size:1.1rem;font-weight:600;word-break:break-all"></a>
-        <div style="margin-top:1rem">
-          <p style="color:#94a3b8;font-size:0.85rem">Enter this code:</p>
-          <div id="authCode" style="font-size:1.5rem;font-weight:700;color:#f1f5f9;letter-spacing:0.1em;margin-top:0.5rem;font-family:monospace"></div>
+  <main class="content">
+    <section class="section active" id="new-session">
+      <div class="section-header">
+        <h2>New Session</h2>
+        <p>Clone a GitHub repo and start a Kilo CLI session.</p>
+      </div>
+      <div class="card">
+        <div class="form-row">
+          <div class="form-group" style="flex:2">
+            <label for="repoUrl">Repository URL</label>
+            <input type="text" id="repoUrl" placeholder="https://github.com/user/repo.git" autocomplete="off" required>
+          </div>
+          <div class="form-group" style="flex:1">
+            <label for="branch">Branch</label>
+            <input type="text" id="branch" placeholder="e.g. main" autocomplete="off" required>
+          </div>
+          <button class="btn btn-primary" id="spinBtn" onclick="spinUp()">Spin Up Agent</button>
         </div>
-        <div id="authSpinner" style="margin-top:1rem">
-          <span class="spinner"></span>
-          <span style="color:#94a3b8;font-size:0.85rem">Waiting for authorization...</span>
+        <p class="helper-text">The repo URL must end in <code>.git</code>.</p>
+      </div>
+    </section>
+
+    <section class="section" id="sessions">
+      <div class="section-header">
+        <h2>Workspace Sessions</h2>
+        <p>Active and recently stopped Kilo sessions.</p>
+      </div>
+      <div class="card" id="sessionsCard">
+        <div id="sessionsList">
+          <div class="empty">No active sessions. Spin one up above.</div>
         </div>
       </div>
-      <button class="btn btn-danger btn-sm" onclick="cancelAuth()">Cancel</button>
-    </div>
-    <div id="authActions">
-      <button class="btn btn-primary" id="loginBtn" onclick="startAuth()">Login to Kilo Gateway</button>
-    </div>
-  </div>
+    </section>
 
-  <div class="card">
-    <h2>New Session</h2>
-    <div class="input-row">
-      <input type="text" id="repoUrl" placeholder="https://github.com/user/repo.git" autocomplete="off" style="flex:2;min-width:250px" required>
-      <input type="text" id="branch" placeholder="Branch (e.g. main)" autocomplete="off" style="flex:1;min-width:120px" required>
-      <button class="btn btn-primary" id="spinBtn" onclick="spinUp()">Spin Up Agent</button>
-    </div>
-  </div>
+    <section class="section" id="diagnostics">
+      <div class="section-header">
+        <h2>Diagnostics
+          <button class="btn btn-primary btn-sm" onclick="loadDiag()">Refresh</button>
+        </h2>
+        <p>System status and configuration.</p>
+      </div>
+      <div class="card">
+        <div id="diagPanel">
+          <div class="empty">Loading diagnostics…</div>
+        </div>
+      </div>
+    </section>
 
-  <div class="card">
-    <h2>Workspace Sessions</h2>
-    <div id="sessionsList">
-      <div class="empty">No active sessions. Spin one up above.</div>
-    </div>
-  </div>
+    <section class="section" id="logs">
+      <div class="section-header">
+        <h2>Recent Logs
+          <button class="btn btn-primary btn-sm" onclick="loadLogs()">Refresh</button>
+        </h2>
+        <p>Latest output from the in-memory ring buffer.</p>
+      </div>
+      <div class="card">
+        <div class="log-panel" id="logPanel">
+          <div class="empty">Loading logs…</div>
+        </div>
+      </div>
+    </section>
 
-  <div class="card" style="border-color:#6366f1">
-    <h2>Diagnostics
-      <button class="btn btn-primary btn-sm" onclick="loadDiag()" style="float:right; font-size:0.8rem">Refresh</button>
-    </h2>
-    <div id="diagPanel" style="font-size:0.8rem;line-height:1.5">
-      <div class="empty">Loading diagnostics...</div>
-    </div>
-
-    <h2 style="margin-top:1rem">Recent Logs
-      <button class="btn btn-primary btn-sm" onclick="loadLogs()" style="float:right; font-size:0.8rem">Refresh</button>
-    </h2>
-    <div id="logPanel" style="background:rgba(15, 23, 42, 0.7);border-radius:8px;padding:0.75rem;font-size:0.75rem;line-height:1.4;max-height:400px;overflow-y:auto;font-family:monospace;white-space:pre-wrap;word-break:break-all">
-      <div class="empty">Loading logs...</div>
-    </div>
-  </div>
+    <section class="section" id="auth">
+      <div class="section-header">
+        <h2>Kilo Gateway Authentication</h2>
+        <p>Authenticate to enable session relay to the Cloud Dashboard.</p>
+      </div>
+      <div class="card">
+        <div id="authStatus" style="margin-bottom:1rem;font-size:0.9rem"></div>
+        <div id="authFlow" class="auth-flow" style="display:none">
+          <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:0.75rem">Open this URL in your browser:</p>
+          <a id="authUrl" class="auth-url" href="#" target="_blank"></a>
+          <div style="margin-top:1.25rem">
+            <p style="color:var(--text-secondary);font-size:0.85rem">Enter this code:</p>
+            <div id="authCode" class="auth-code"></div>
+          </div>
+          <div id="authSpinner" style="margin-top:1rem">
+            <span class="spinner"></span>
+            <span style="color:var(--text-secondary);font-size:0.85rem">Waiting for authorization…</span>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="cancelAuth()" style="margin-top:1.25rem">Cancel</button>
+        </div>
+        <div id="authActions">
+          <button class="btn btn-primary" id="loginBtn" onclick="startAuth()">Login to Kilo Gateway</button>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
 
 <div id="toast" class="toast"></div>
