@@ -303,6 +303,9 @@ app.post("/api/spin-up", authGate, writeLimiter, async (req, res) => {
   sessions.push(session);
   saveSessions(sessions);
   log(`spin-up ${logPrefix(label)} created id=${sessionId} pid=${kiloPid} branch=${branch}`);
+  if (result.started === false) {
+    log(`spin-up ${logPrefix(label)} WARNING — kilo session did NOT confirm a created cloud session (reason=${result.reason})`);
+  }
   res.status(201).json(session);
 });
 

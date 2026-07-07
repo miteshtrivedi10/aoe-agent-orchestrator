@@ -271,6 +271,38 @@ describe("kilo", () => {
     });
   });
 
+  describe("detectKiloStartupErrors", () => {
+    it("returns null when no error signature present", () => {
+      assert.equal(kilo.detectKiloStartupErrors("kilo> how can I help you"), null);
+    });
+    it("detects auth failure signatures", () => {
+      assert.equal(kilo.detectKiloStartupErrors("error: authentication failed"), "authentication failed");
+    });
+    it("detects crash/panic signatures", () => {
+      assert.equal(kilo.detectKiloStartupErrors("fatal: process exited with code 1"), "fatal:");
+    });
+  });
+
+  describe("submitPromptConfirmed", () => {
+    it("returns true and sends Enter only after the prompt is echoed", async () => {
+      let buffer = "kilo> ";
+      const getBuffer = () => buffer;
+      const writes = [];
+      const fakePty = { write: (s) => { writes.push(s); buffer += s; } };
+      const ok = await kilo.submitPromptConfirmed(fakePty, getBuffer, "t", "_t", "hello world");
+      assert.equal(ok, true);
+      assert.deepEqual(writes, ["hello world", "\r"]);
+    });
+    it("returns false when the TUI never echoes the keystrokes", async () => {
+      const getBuffer = () => "kilo> "; // never appends the typed text
+      const writes = [];
+      const fakePty = { write: (s) => { writes.push(s); } };
+      const ok = await kilo.submitPromptConfirmed(fakePty, getBuffer, "t", "_t", "dropped text");
+      assert.equal(ok, false);
+      assert.deepEqual(writes, ["dropped text"]); // Enter never sent
+    });
+  });
+
   describe("checkGateway", () => {
     it("logs reachable when fetch succeeds", async () => {
       global.fetch = mock.fn(() => Promise.resolve({ status: 200 }));
