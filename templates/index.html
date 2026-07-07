@@ -57,11 +57,6 @@ body {
   line-height: 1.5;
 }
 
-.app {
-  display: flex;
-  min-height: 100vh;
-}
-
 /* Sidebar */
 .sidebar {
   position: fixed;
@@ -674,6 +669,72 @@ tr:last-child td { border-bottom: none; }
 
 <script>window.__AGENT_DOCK_TOKEN__="";</script>
 <script>
+// Theme handling
+function initTheme() {
+  const stored = localStorage.getItem('agent-dock-theme');
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const theme = stored || (prefersDark ? 'dark' : 'light');
+  setTheme(theme);
+}
+
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('agent-dock-theme', theme);
+  const btn = document.getElementById('themeToggle');
+  if (btn) {
+    btn.textContent = theme === 'dark' ? '☀️ Light' : '🌙 Dark';
+  }
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'light';
+  setTheme(current === 'dark' ? 'light' : 'dark');
+}
+
+// Navigation handling
+function navigateTo(targetId, pushState) {
+  if (typeof pushState === 'undefined') pushState = true;
+  document.querySelectorAll('.section').forEach(function(s) { s.classList.remove('active'); });
+  document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+
+  const section = document.getElementById(targetId);
+  const nav = document.querySelector('.nav-item[data-target="' + targetId + '"]');
+  if (section) section.classList.add('active');
+  if (nav) nav.classList.add('active');
+
+  if (pushState && window.history && window.history.pushState) {
+    window.history.pushState(null, null, '#' + targetId);
+  }
+
+  closeSidebar();
+}
+
+function handleHash() {
+  const hash = window.location.hash.replace('#', '') || 'new-session';
+  const valid = ['new-session', 'sessions', 'diagnostics', 'logs', 'auth'];
+  navigateTo(valid.indexOf(hash) !== -1 ? hash : 'new-session', false);
+}
+
+// Mobile sidebar
+function openSidebar() {
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('overlay').classList.add('show');
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('overlay').classList.remove('show');
+}
+
+// Sidebar auth indicator
+function updateSidebarAuth(status) {
+  const dot = document.getElementById('sidebarAuthDot');
+  const text = document.getElementById('sidebarAuthText');
+  if (!dot || !text) return;
+  dot.className = 'auth-pill-dot ' + (status === 'success' ? 'authenticated' : status === 'pending' ? 'pending' : '');
+  text.textContent = status === 'success' ? 'Authenticated' : status === 'pending' ? 'Auth pending' : 'Not authenticated';
+}
+
 const AUTH_HEADERS = (function() {
   var t = window.__AGENT_DOCK_TOKEN__;
   return (typeof t === "string" && t.length > 0) ? { Authorization: "Bearer " + t } : {};
@@ -875,17 +936,17 @@ async function loadSessions() {
       let actions = '';
       // Generate action buttons with unique IDs for state management
       if (status === 'running') {
-        actions = `<button class="btn btn-warning btn-sm" id="pause-${s.id}" onclick="pauseSession('${s.id}')">Pause</button>`;
+        actions = `<button type="button" class="btn btn-warning btn-sm" id="pause-${s.id}" onclick="pauseSession('${s.id}')">Pause</button>`;
       } else if (status === 'paused') {
         if (s.cloud_session_id) { // Only allow resume if there's a cloud session ID
-          actions += `<button class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
+          actions += `<button type="button" class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
         }
-        actions += `<button class="btn btn-danger btn-sm" id="kill-${s.id}" onclick="killSession('${s.id}')">Kill</button>`;
+        actions += `<button type="button" class="btn btn-danger btn-sm" id="kill-${s.id}" onclick="killSession('${s.id}')">Kill</button>`;
       } else if (status === 'stopped' || status === 'error') {
         if (s.cloud_session_id) {
-          actions += `<button class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
+          actions += `<button type="button" class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
         }
-        actions += `<button class="btn btn-danger btn-sm" id="kill-${s.id}" onclick="killSession('${s.id}')">Kill</button>`;
+        actions += `<button type="button" class="btn btn-danger btn-sm" id="kill-${s.id}" onclick="killSession('${s.id}')">Kill</button>`;
       } else { // For 'killed' or any other terminal status
         actions = `<span class="badge badge-killed">Killed</span>`; // Show as killed if state is terminal
         if (s.exit_code != null) {
@@ -912,6 +973,11 @@ async function loadSessions() {
 
 
 // Initial load and polling
+initTheme();
+handleHash();
+window.addEventListener('hashchange', handleHash);
+window.addEventListener('popstate', handleHash);
+
 loadSessions();
 loadDiag();
 loadLogs();
@@ -927,19 +993,23 @@ async function checkAuth() {
   try {
     const res = await fetch('/api/auth/status');
     const d = await res.json();
+    updateSidebarAuth(d.status);
     const card = document.getElementById('authCard');
     const statusEl = document.getElementById('authStatus');
     const flowEl = document.getElementById('authFlow');
     const actionsEl = document.getElementById('authActions');
 
-    // If authenticated, hide the auth card and return
+    // If authenticated, show success state inside the auth section
     if (d.status === 'success') {
-      card.style.display = 'none';
+      if (card) card.style.display = 'block';
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--success);font-weight:600">✓ Authenticated with Kilo Gateway</span>';
+      if (flowEl) flowEl.style.display = 'none';
+      if (actionsEl) actionsEl.style.display = 'none';
       return;
     }
 
     // If not authenticated, ensure the auth card is visible
-    card.style.display = 'block';
+    if (card) card.style.display = 'block';
 
     if (d.status === 'pending') {
       showAuthFlow(d);
