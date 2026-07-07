@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Kilo Cloud Manager</title>
+<title>Agent Dock</title>
 <style>
 :root,
 [data-theme="light"] {
@@ -544,19 +544,19 @@ tr:last-child td { border-bottom: none; }
   </div>
 
   <nav class="sidebar-nav">
-    <button class="nav-item active" data-target="new-session" onclick="navigateTo('new-session')">
+    <button type="button" class="nav-item active" data-target="new-session" onclick="navigateTo('new-session')">
       <span class="nav-icon">+</span> New Session
     </button>
-    <button class="nav-item" data-target="sessions" onclick="navigateTo('sessions')">
+    <button type="button" class="nav-item" data-target="sessions" onclick="navigateTo('sessions')">
       <span class="nav-icon">◎</span> Sessions
     </button>
-    <button class="nav-item" data-target="diagnostics" onclick="navigateTo('diagnostics')">
+    <button type="button" class="nav-item" data-target="diagnostics" onclick="navigateTo('diagnostics')">
       <span class="nav-icon">◈</span> Diagnostics
     </button>
-    <button class="nav-item" data-target="logs" onclick="navigateTo('logs')">
+    <button type="button" class="nav-item" data-target="logs" onclick="navigateTo('logs')">
       <span class="nav-icon">≡</span> Logs
     </button>
-    <button class="nav-item" data-target="auth" onclick="navigateTo('auth')">
+    <button type="button" class="nav-item" data-target="auth" onclick="navigateTo('auth')">
       <span class="nav-icon">🔒</span> Auth
     </button>
   </nav>
@@ -566,13 +566,13 @@ tr:last-child td { border-bottom: none; }
       <span class="auth-pill-dot" id="sidebarAuthDot"></span>
       <span id="sidebarAuthText">Checking auth…</span>
     </div>
-    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()">🌙 Dark</button>
+    <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()">🌙 Dark</button>
   </div>
 </aside>
 
 <div class="main">
   <header class="topbar">
-    <button class="menu-btn" onclick="openSidebar()">☰</button>
+    <button type="button" class="menu-btn" onclick="openSidebar()">☰</button>
     <div class="brand" style="font-size:1rem">
       <div class="brand-icon" style="width:28px;height:28px;font-size:0.85rem">A</div>
       Agent Dock
@@ -596,7 +596,7 @@ tr:last-child td { border-bottom: none; }
             <label for="branch">Branch</label>
             <input type="text" id="branch" placeholder="e.g. main" autocomplete="off" required>
           </div>
-          <button class="btn btn-primary" id="spinBtn" onclick="spinUp()">Spin Up Agent</button>
+          <button type="button" class="btn btn-primary" id="spinBtn" onclick="spinUp()">Spin Up Agent</button>
         </div>
         <p class="helper-text">The repo URL must end in <code>.git</code>.</p>
       </div>
@@ -617,7 +617,7 @@ tr:last-child td { border-bottom: none; }
     <section class="section" id="diagnostics">
       <div class="section-header">
         <h2>Diagnostics
-          <button class="btn btn-primary btn-sm" onclick="loadDiag()">Refresh</button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="loadDiag()">Refresh</button>
         </h2>
         <p>System status and configuration.</p>
       </div>
@@ -631,7 +631,7 @@ tr:last-child td { border-bottom: none; }
     <section class="section" id="logs">
       <div class="section-header">
         <h2>Recent Logs
-          <button class="btn btn-primary btn-sm" onclick="loadLogs()">Refresh</button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="loadLogs()">Refresh</button>
         </h2>
         <p>Latest output from the in-memory ring buffer.</p>
       </div>
@@ -647,11 +647,11 @@ tr:last-child td { border-bottom: none; }
         <h2>Kilo Gateway Authentication</h2>
         <p>Authenticate to enable session relay to the Cloud Dashboard.</p>
       </div>
-      <div class="card">
+      <div class="card" id="authCard">
         <div id="authStatus" style="margin-bottom:1rem;font-size:0.9rem"></div>
         <div id="authFlow" class="auth-flow" style="display:none">
           <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:0.75rem">Open this URL in your browser:</p>
-          <a id="authUrl" class="auth-url" href="#" target="_blank"></a>
+          <a id="authUrl" class="auth-url" href="#" target="_blank" rel="noopener noreferrer"></a>
           <div style="margin-top:1.25rem">
             <p style="color:var(--text-secondary);font-size:0.85rem">Enter this code:</p>
             <div id="authCode" class="auth-code"></div>
@@ -660,10 +660,10 @@ tr:last-child td { border-bottom: none; }
             <span class="spinner"></span>
             <span style="color:var(--text-secondary);font-size:0.85rem">Waiting for authorization…</span>
           </div>
-          <button class="btn btn-danger btn-sm" onclick="cancelAuth()" style="margin-top:1.25rem">Cancel</button>
+          <button type="button" class="btn btn-danger btn-sm" onclick="cancelAuth()" style="margin-top:1.25rem">Cancel</button>
         </div>
         <div id="authActions">
-          <button class="btn btn-primary" id="loginBtn" onclick="startAuth()">Login to Kilo Gateway</button>
+          <button type="button" class="btn btn-primary" id="loginBtn" onclick="startAuth()">Login to Kilo Gateway</button>
         </div>
       </div>
     </section>
