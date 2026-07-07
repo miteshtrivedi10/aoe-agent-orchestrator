@@ -9,3 +9,4 @@ node_modules/
 /repos/
 /sessions.json
 .agents/**
+.kimchi

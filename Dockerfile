@@ -55,6 +55,7 @@ COPY templates/ /app/templates/
 COPY entrypoint.sh /app/entrypoint.sh
 COPY kilo.jsonc /app/kilo.jsonc
 COPY rules/ /app/rules/
+COPY superpowers/ /app/superpowers/
 
 RUN chmod +x /app/entrypoint.sh
 
