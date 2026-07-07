@@ -7,6 +7,21 @@ mkdir -p /data/kilo /data/repos
 # Git safe.directory — /data is HF persistent storage, may have mismatched UID
 git config --global safe.directory '*'
 
+# ── GitHub Credentials for Push ──────────────────────────────────
+# When GITHUB_TOKEN is provided (HF secret or env var), configure git so that
+# pushes to github.com are authenticated automatically. `url.<base>.insteadOf`
+# rewrites every https://github.com/... remote URL to embed the token at fetch
+# AND push time. This covers the session's cloned work tree (whose origin may
+# not contain credentials) so agent pushes succeed once the user grants the
+# push permission. Username is irrelevant to GitHub; the token is used as the
+# password. Never log the token.
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+  echo "=== GitHub credentials configured (insteadOf) — agent pushes to github.com will authenticate ==="
+else
+  echo "=== No GITHUB_TOKEN set — agent cannot push to private github.com repos (clone is anonymous) ==="
+fi
+
 # ── HF Secrets Injection ────────────────────────────────────────────
 # Hugging Face Spaces inject secrets via the HF_SECRETS env var as a single
 # JSON blob containing all secret keys together, e.g.:
@@ -18,7 +33,7 @@ if [ -n "${HF_SECRETS:-}" ]; then
   while IFS='=' read -r key value; do
     if [ -n "$key" ]; then
       export "$key"="$value"
-      echo "  Exported $key (${#value} chars)"
+      echo "  $key - Available"
     fi
   done < <(node -e "
     const s = JSON.parse(process.env.HF_SECRETS || '{}');

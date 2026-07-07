@@ -1,12 +1,19 @@
 FROM node:20-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git python3 make g++ ca-certificates \
+    git python3 make g++ ca-certificates curl \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHON=/usr/bin/python3
-RUN npm install -g @kilocode/cli --no-optional \
+
+# Install RTK (single Rust binary) into /usr/local/bin so it is on PATH for
+# every kilo session. RTK is stateless — one install covers all sessions; the
+# rtk-rules.md in hermes/rules/ (copied into each session's .kilo/rules) tells
+# the agent to route shell commands through `rtk`.
+RUN RTK_INSTALL_DIR=/usr/local/bin sh -c 'curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh'
+
+RUN npm install -g @kilocode/cli github-mcp-server --no-optional \
     && npm cache clean --force \
     && find /usr/local/lib/node_modules \( -name '*.md' -o -name '*.ts' -o -name '*.map' -o -name '*.flow' -o -name '*.tsbuildinfo' -o -name 'binding.gyp' -o -name 'Makefile' -o -name 'makefile' -o -name '*.mk' \) -delete \
     && find /usr/local/lib/node_modules \( -name 'test' -o -name 'tests' -o -name '__tests__' -o -name 'spec' -o -name 'specs' -o -name 'docs' -o -name 'doc' -o -name 'examples' -o -name 'example' -o -name 'benchmark' -o -name 'benchmarks' -o -name 'fixtures' -o -name '.cache' \) -type d -exec rm -rf {} + 2>/dev/null || true \
@@ -23,9 +30,18 @@ RUN npm install --omit=dev --no-optional \
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git ca-certificates \
+    git ca-certificates ripgrep \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# RTK telemetry is opt-in; keep it off by default in the image.
+ENV RTK_TELEMETRY_DISABLED=1
+
+# Global RTK config (baked once). On failure, RTK saves the full unfiltered
+# output so the agent can read it without re-executing. No command exclusions,
+# so git/tests/lints/aws/etc. are all covered.
+RUN mkdir -p /root/.config/rtk \
+ && printf '[tee]\nenabled = true\nmode = "failures"\n\n[hooks]\nexclude_commands = []\n' > /root/.config/rtk/config.toml
 
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
@@ -38,6 +54,7 @@ COPY lib/ /app/lib/
 COPY templates/ /app/templates/
 COPY entrypoint.sh /app/entrypoint.sh
 COPY kilo.jsonc /app/kilo.jsonc
+COPY rules/ /app/rules/
 
 RUN chmod +x /app/entrypoint.sh
 

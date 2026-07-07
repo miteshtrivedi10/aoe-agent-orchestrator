@@ -5,90 +5,144 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kilo Cloud Manager</title>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #0f172a; color: #e2e8f0; min-height: 100vh;
-  }
-  .container { max-width: 960px; margin: 0 auto; padding: 2rem 1rem; }
-  header { text-align: center; margin-bottom: 2.5rem; }
-  header h1 { font-size: 1.75rem; font-weight: 700; color: #f1f5f9; }
-  header p { color: #94a3b8; margin-top: 0.25rem; font-size: 0.9rem; }
-  .card {
-    background: #1e293b; border-radius: 12px; padding: 1.5rem;
-    border: 1px solid #334155; margin-bottom: 1.5rem;
-  }
-  .card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: #f1f5f9; }
-  .input-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
-  .input-row input {
-    flex: 1; min-width: 200px; padding: 0.7rem 1rem; border-radius: 8px;
-    border: 1px solid #475569; background: #0f172a; color: #e2e8f0;
-    font-size: 0.95rem; outline: none; transition: border-color 0.15s;
-  }
-  .input-row input:focus { border-color: #6366f1; }
-  .input-row input::placeholder { color: #64748b; }
-  .btn {
-    padding: 0.7rem 1.5rem; border-radius: 8px; border: none;
-    font-size: 0.95rem; font-weight: 600; cursor: pointer;
-    transition: background 0.15s, opacity 0.15s; white-space: nowrap;
-  }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-primary { background: #6366f1; color: #fff; }
-  .btn-primary:hover:not(:disabled) { background: #4f46e5; }
-  .btn-danger { background: #ef4444; color: #fff; }
-  .btn-danger:hover:not(:disabled) { background: #dc2626; }
-  .btn-warning { background: #f59e0b; color: #1e293b; }
-  .btn-warning:hover:not(:disabled) { background: #d97706; }
-  .btn-sm { padding: 0.4rem 1rem; font-size: 0.85rem; }
+:root {
+  --primary-color: #6366f1; /* Purple from template */
+  --secondary-color: #4f46e5; /* Darker purple for hover */
+  --accent-color-warning: #f59e0b; /* Yellow/Orange */
+  --accent-color-danger: #ef4444; /* Red */
+  --dark-bg: #0f172a;
+  --card-bg: #1e293b;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --border-color: #334155;
+  --input-border-focus: #6366f1;
+}
 
-  .empty { text-align: center; color: #64748b; padding: 2rem 0; }
-  table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; font-size: 0.8rem; color: #94a3b8;
-       text-transform: uppercase; letter-spacing: 0.05em;
-       padding-bottom: 0.75rem; border-bottom: 1px solid #334155; }
-  td { padding: 0.75rem 0; border-bottom: 1px solid #1e293b;
-       font-size: 0.9rem; vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
-  td .repo { font-weight: 600; color: #e2e8f0; }
-  td .url { color: #94a3b8; font-size: 0.8rem; }
-  .badge {
-    display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
-    font-size: 0.75rem; font-weight: 600;
-  }
-  .badge-running { background: #065f46; color: #6ee7b7; }
-  .badge-paused { background: #78350f; color: #fbbf24; }
-  .badge-stopped { background: #1e3a5f; color: #93c5fd; }
-  .badge-killed { background: #7f1d1d; color: #fca5a5; }
-  .badge-error { background: #7f1d1d; color: #fca5a5; }
-  .toast {
-    position: fixed; top: 1rem; right: 1rem; padding: 0.75rem 1.25rem;
-    border-radius: 8px; color: #fff; font-size: 0.9rem; font-weight: 500;
-    opacity: 0; transform: translateY(-10px); transition: all 0.3s;
-    z-index: 1000; pointer-events: none;
-  }
-  .toast.show { opacity: 1; transform: translateY(0); }
-  .toast-success { background: #065f46; }
-  .toast-error { background: #991b1b; }
-  .spinner {
-    display: inline-block; width: 1rem; height: 1rem;
-    border: 2px solid #6366f1; border-top-color: transparent;
-    border-radius: 50%; animation: spin 0.6s linear infinite;
-    vertical-align: middle; margin-right: 0.5rem;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .status-dot {
-    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-    background: #22c55e; margin-right: 0.4rem; animation: pulse 2s infinite;
-  }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-  .status-dot-stopped {
-    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-    background: #64748b; margin-right: 0.4rem;
-  }
-  .status-dot-paused {
-    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-    background: #f59e0b; margin-right: 0.4rem; animation: pulse 2s infinite;
-  }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Roboto', sans-serif; /* Example font */
+  background: var(--dark-bg); color: var(--text-primary); min-height: 100vh;
+}
+.container { max-width: 960px; margin: 0 auto; padding: 2rem 1rem; }
+header { text-align: center; margin-bottom: 2.5rem; padding: 2rem 0; }
+header h1 { font-size: 2.5rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem; }
+header p { color: var(--text-secondary); font-size: 1.1rem; opacity: 0.8; }
+.card {
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 2rem;
+  border: 1px solid var(--border-color);
+  margin-bottom: 2rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2); /* Subtle shadow */
+  transition: all 0.3s ease;
+}
+.card:hover {
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.card h2 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  color: var(--text-primary);
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+.input-row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+.input-row input {
+  flex: 1; min-width: 200px; padding: 0.8rem 1.2rem; border-radius: 8px;
+  border: 1px solid var(--border-color); background: var(--dark-bg); color: var(--text-primary);
+  font-size: 1rem; outline: none; transition: border-color 0.2s ease-in-out;
+}
+.input-row input:focus { border-color: var(--primary-color); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3); }
+.input-row input::placeholder { color: var(--text-secondary); opacity: 0.7; }
+.btn {
+  padding: 0.8rem 1.8rem; border-radius: 8px; border: none;
+  font-size: 1rem; font-weight: 600; cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+  white-space: nowrap;
+  display: inline-flex; /* For centering spinners */
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem; /* Space for spinner */
+}
+.btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(0px);
+}
+.btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+.btn-primary { background: var(--primary-color); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--secondary-color); }
+.btn-danger { background: var(--accent-color-danger); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: #dc2626; } /* Darker red */
+.btn-warning { background: var(--accent-color-warning); color: var(--dark-bg); }
+.btn-warning:hover:not(:disabled) { background: #d97706; } /* Darker yellow */
+.btn-sm { padding: 0.5rem 1rem; font-size: 0.9rem; }
+.spinner {
+  display: inline-block; width: 1rem; height: 1rem;
+  border: 2px solid var(--text-primary); border-top-color: var(--primary-color);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+}
+.spinner-sm { width: 0.8rem; height: 0.8rem; border-width: 1.5px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty { text-align: center; color: var(--text-secondary); padding: 2.5rem 0; font-style: italic; opacity: 0.8;}
+table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+th {
+  text-align: left; font-size: 0.75rem; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding-bottom: 0.8rem; border-bottom: 1px solid var(--border-color);
+}
+td {
+  padding: 0.9rem 0.5rem; border-bottom: 1px solid var(--card-bg);
+  font-size: 0.95rem; vertical-align: middle;
+}
+td .repo { font-weight: 500; color: var(--text-primary); }
+td .url { color: var(--text-secondary); font-size: 0.8rem; display: block; margin-top: 0.2rem; word-break: break-all; }
+tr:last-child td { border-bottom: none; }
+.badge {
+  display: inline-block; padding: 0.2rem 0.8rem; border-radius: 999px;
+  font-size: 0.7rem; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: background-color 0.2s, color 0.2s;
+}
+.badge-running { background: rgba(34, 197, 94, 0.2); color: #22c55e; } /* Green */
+.badge-paused { background: rgba(245, 158, 11, 0.2); color: #f59e0b; } /* Yellow */
+.badge-stopped { background: rgba(100, 116, 139, 0.2); color: #94a3b8; } /* Gray */
+.badge-killed { background: rgba(239, 68, 60, 0.2); color: #ef4444; } /* Red */
+.badge-error { background: rgba(239, 68, 60, 0.2); color: #ef4444; }
+.badge-pending { background: rgba(96, 165, 250, 0.2); color: #3b82f6; } /* Blue */
+.status-dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  margin-right: 0.6rem; animation: pulse 2s infinite ease-in-out;
+  background-color: #22c55e; /* Green */
+}
+.status-dot-paused { background-color: #f59e0b; } /* Yellow */
+.status-dot-stopped, .status-dot-killed, .status-dot-error { background-color: #64748b; animation: none; } /* Gray */
+.status-dot-pending { background-color: #3b82f6; animation: none; } /* Blue */
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.7); } }
+.toast {
+  position: fixed; top: 1.5rem; right: 1.5rem; padding: 1rem 1.5rem;
+  border-radius: 10px; color: #fff; font-size: 0.95rem; font-weight: 500;
+  opacity: 0; transform: translateY(-15px); transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+  z-index: 1000; pointer-events: none; box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast-success { background: #065f46; } /* Dark Green */
+.toast-error { background: #7f1d1d; } /* Dark Red */
+#authCard { border-radius: 16px; border-left: 5px solid var(--accent-color-warning) !important; }
+#authFlow { background: #0f172a; border-radius: 10px; padding: 1.5rem; margin-bottom: 1rem; text-align: center; }
+#authUrl { color: var(--primary-color); text-decoration: underline; }
+#authCode { font-size: 1.8rem; letter-spacing: 0.15em; margin: 0.5rem 0; }
+#authSpinner span:first-child { border-color: var(--text-primary); border-top-color: var(--primary-color); }
+#authSpinner span:last-child { color: var(--text-secondary); font-size: 0.9rem; }
+@media (max-width: 768px) {
+  .input-row { flex-direction: column; gap: 0.75rem; }
+  .input-row input, .btn { min-width: 100%; }
+  .btn { padding: 0.9rem 1.5rem; }
+  header h1 { font-size: 2rem; }
+}
 </style>
 </head>
 <body>
@@ -151,7 +205,7 @@
     <h2 style="margin-top:1rem">Recent Logs
       <button class="btn btn-primary btn-sm" onclick="loadLogs()" style="float:right; font-size:0.8rem">Refresh</button>
     </h2>
-    <div id="logPanel" style="background:#0f172a;border-radius:8px;padding:0.75rem;font-size:0.75rem;line-height:1.4;max-height:400px;overflow-y:auto;font-family:monospace;white-space:pre-wrap;word-break:break-all">
+    <div id="logPanel" style="background:rgba(15, 23, 42, 0.7);border-radius:8px;padding:0.75rem;font-size:0.75rem;line-height:1.4;max-height:400px;overflow-y:auto;font-family:monospace;white-space:pre-wrap;word-break:break-all">
       <div class="empty">Loading logs...</div>
     </div>
   </div>
@@ -168,7 +222,7 @@ const AUTH_HEADERS = (function() {
 function authHeaders(extra) {
   return Object.assign({}, AUTH_HEADERS, extra || {});
 }
-const repoUrl = document.getElementById('repoUrl');
+const repoUrlInput = document.getElementById('repoUrl');
 const branchInput = document.getElementById('branch');
 const spinBtn = document.getElementById('spinBtn');
 const sessionsList = document.getElementById('sessionsList');
@@ -179,99 +233,125 @@ function toast(msg, type) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
+function manageSessionActionButton(sessionId, action, state = 'idle') {
+    const buttonId = `${action}-${sessionId}`;
+    const btn = document.getElementById(buttonId);
+    if (!btn) return;
+
+    const spinnerHtml = '<span class="spinner spinner-sm"></span>';
+    let originalText = '';
+
+    if (action === 'pause') originalText = 'Pause';
+    else if (action === 'resume') originalText = 'Resume';
+    else if (action === 'kill') originalText = 'Kill';
+
+    if (state === 'loading') {
+        btn.disabled = true;
+        btn.innerHTML = spinnerHtml + (' ' + originalText);
+        btn.style.cursor = 'not-allowed';
+        // Preserve original color for disabled state look
+        if (btn.classList.contains('btn-warning')) btn.style.backgroundColor = '#d97706';
+        if (btn.classList.contains('btn-primary')) btn.style.backgroundColor = '#4f46e5';
+        if (btn.classList.contains('btn-danger')) btn.style.backgroundColor = '#dc2626';
+    } else if (state === 'idle' || state === 'error') {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        btn.style.cursor = 'pointer';
+        // Revert styles - this might need more sophisticated CSS management
+        btn.style.backgroundColor = '';
+    }
+}
+
 async function spinUp() {
-  const url = repoUrl.value.trim();
+  const url = repoUrlInput.value.trim();
   if (!url) { toast('Enter a repo URL', 'error'); return; }
   if (!/\.git(?:\/?|#.*)?$/i.test(url)) {
     toast('Repo URL must end in .git', 'error'); return;
   }
   const branch = branchInput.value.trim();
   if (!branch) { toast('Enter a branch', 'error'); return; }
-  spinBtn.disabled = true; spinBtn.innerHTML = '<span class="spinner"></span>Spinning...';
+
+  spinBtn.disabled = true;
+  spinBtn.innerHTML = '<span class="spinner"></span>Spinning...'; // Use spinner HTML
+
   try {
     const res = await fetch('/api/spin-up', {
       method: 'POST', headers: authHeaders({'Content-Type': 'application/json'}),
       body: JSON.stringify({ repo_url: url, branch: branch }),
     });
     const data = await res.json();
-    if (!res.ok) { toast(data.error || 'Failed', 'error'); }
-    else { toast('Session started for ' + data.repo_name, 'success'); repoUrl.value = ''; branchInput.value = ''; }
-  } catch(e) { toast('Network error', 'error'); }
-  finally { spinBtn.disabled = false; spinBtn.textContent = 'Spin Up Agent'; }
-  loadSessions();
+    if (!res.ok) { toast(data.error || 'Failed to spin up session', 'error'); }
+    else { toast('Session started for ' + data.repo_name, 'success'); repoUrlInput.value = ''; branchInput.value = ''; }
+  } catch(e) { toast('Network error: ' + e.message, 'error'); }
+  finally {
+    spinBtn.disabled = false;
+    spinBtn.textContent = 'Spin Up Agent';
+  }
+  // loadSessions() will be called by polling, ensuring an up-to-date view
 }
 
 async function killSession(id) {
+  manageSessionActionButton(id, 'kill', 'loading');
   try {
     const res = await fetch('/api/kill/' + id, { method: 'POST', headers: authHeaders() });
     const data = await res.json();
-    if (res.ok) toast('Session killed', 'success');
-    else toast(data.error || 'Failed', 'error');
-  } catch(e) { toast('Network error', 'error'); }
-  loadSessions();
+    if (res.ok) {
+      toast('Session killed', 'success');
+    } else {
+      toast(data.error || 'Failed to kill session', 'error');
+      manageSessionActionButton(id, 'kill', 'error');
+    }
+  } catch(e) {
+    toast('Network error: ' + e.message, 'error');
+    manageSessionActionButton(id, 'kill', 'error');
+  }
+  // loadSessions() will refresh the state, and buttons will be re-rendered accordingly
 }
 
 async function pauseSession(id) {
+  manageSessionActionButton(id, 'pause', 'loading');
   try {
     const res = await fetch('/api/sessions/' + id + '/pause', { method: 'POST', headers: authHeaders() });
     const data = await res.json();
-    if (res.ok) toast('Session paused', 'success');
-    else toast(data.error || 'Failed', 'error');
-  } catch(e) { toast('Network error', 'error'); }
-  loadSessions();
+    if (res.ok) {
+      toast('Session paused', 'success');
+    } else {
+      toast(data.error || 'Failed to pause session', 'error');
+      manageSessionActionButton(id, 'pause', 'error');
+    }
+  } catch(e) {
+    toast('Network error: ' + e.message, 'error');
+    manageSessionActionButton(id, 'pause', 'error');
+  }
+  // loadSessions() will refresh the state
 }
 
 async function resumeSession(id) {
+  manageSessionActionButton(id, 'resume', 'loading');
   try {
     const res = await fetch('/api/sessions/' + id + '/resume', { method: 'POST', headers: authHeaders() });
     const data = await res.json();
-    if (res.ok) toast('Session resumed', 'success');
-    else toast(data.error || 'Failed', 'error');
-  } catch(e) { toast('Network error', 'error'); }
-  loadSessions();
+    if (res.ok) {
+      toast('Session resumed', 'success');
+    } else {
+      toast(data.error || 'Failed to resume session', 'error');
+      manageSessionActionButton(id, 'resume', 'error');
+    }
+  } catch(e) {
+    toast('Network error: ' + e.message, 'error');
+    manageSessionActionButton(id, 'resume', 'error');
+  }
+  // loadSessions() will refresh the state
 }
 
-async function loadSessions() {
-  try {
-    const res = await fetch('/api/sessions', { headers: authHeaders() });
-    const sessions = await res.json();
-    if (sessions.length === 0) {
-      sessionsList.innerHTML = '<div class="empty">No sessions yet. Spin one up above.</div>';
-      return;
-    }
-    let html = '<table><thead><tr><th>Repository</th><th>Branch</th><th>Started</th><th>Status</th><th></th></tr></thead><tbody>';
-    for (const s of sessions) {
-      const status = s.status || 'running';
-      const dotClass = status === 'running' ? 'status-dot' : status === 'paused' ? 'status-dot-paused' : 'status-dot-stopped';
-      const badgeClass = 'badge-' + status;
-      let actions = '';
-      if (status === 'running') {
-        actions = '<button class="btn btn-warning btn-sm" onclick="pauseSession(\'' + s.id + '\')">Pause</button>';
-      } else if (status === 'paused') {
-        if (s.cloud_session_id) actions += '<button class="btn btn-primary btn-sm" onclick="resumeSession(\'' + s.id + '\')">Resume</button> ';
-        actions += '<button class="btn btn-danger btn-sm" onclick="killSession(\'' + s.id + '\')">Kill</button>';
-      } else if (status === 'stopped') {
-        if (s.cloud_session_id) actions += '<button class="btn btn-primary btn-sm" onclick="resumeSession(\'' + s.id + '\')">Resume</button> ';
-        actions += '<button class="btn btn-danger btn-sm" onclick="killSession(\'' + s.id + '\')">Kill</button>';
-      } else {
-        actions = '<span style="color:#64748b;font-size:0.8rem">' + (s.exit_code != null ? 'exit ' + s.exit_code : '') + '</span>';
-      }
-      html += '<tr>' +
-        '<td><div class="repo">' + esc(s.repo_name) + '</div><div class="url">' + esc(s.repo_url) + '</div></td>' +
-        '<td style="color:#94a3b8;font-size:0.85rem">' + esc(s.branch || 'default') + '</td>' +
-        '<td style="color:#94a3b8;font-size:0.85rem">' + timeAgo(s.started_at) + '</td>' +
-        '<td><span class="' + dotClass + '"></span><span class="badge ' + badgeClass + '">' + esc(status) + '</span></td>' +
-        '<td style="text-align:right">' + actions + '</td>' +
-        '</tr>';
-    }
-    html += '</tbody></table>';
-    sessionsList.innerHTML = html;
-  } catch(e) { /* ignore polling errors */ }
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
 }
-
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 function timeAgo(iso) {
+  if (!iso) return 'never';
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (diff < 60) return 'just now';
   if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
@@ -287,14 +367,14 @@ async function loadDiag() {
       const val = v === null ? '<span style="color:#ef4444">null</span>'
                : v === true ? '<span style="color:#22c55e">true</span>'
                : v === false ? '<span style="color:#ef4444">false</span>'
-               : String(v).substring(0, 300);
+               : String(v).substring(0, 300); // Truncate long values
       html += '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0">' + k + '</td>'
             + '<td style="padding:0.2rem 0">' + val + '</td></tr>';
     }
     html += '</tbody></table>';
     document.getElementById('diagPanel').innerHTML = html;
   } catch(e) {
-    document.getElementById('diagPanel').innerHTML = '<div class="empty">Error: ' + e.message + '</div>';
+    document.getElementById('diagPanel').innerHTML = '<div class="empty">Error loading diagnostics: ' + esc(e.message) + '</div>';
   }
 }
 
@@ -303,23 +383,83 @@ async function loadLogs() {
     const res = await fetch('/api/logs?n=100', { headers: authHeaders() });
     const d = await res.json();
     const el = document.getElementById('logPanel');
-    el.innerHTML = d.lines.reverse().map(l => esc(l)).join('\n');
-    el.scrollTop = el.scrollHeight;
+    // Reverse logs to show most recent first, join with newlines
+    el.innerHTML = d.lines.slice().reverse().map(l => esc(l)).join('\n');
+    el.scrollTop = el.scrollHeight; // Auto-scroll to bottom
   } catch(e) {
-    document.getElementById('logPanel').innerHTML = '<div class="empty">Error: ' + e.message + '</div>';
+    document.getElementById('logPanel').innerHTML = '<div class="empty">Error loading logs: ' + esc(e.message) + '</div>';
   }
 }
 
 function enterSpin(e) { if (e.key === 'Enter') spinUp(); }
-repoUrl.addEventListener('keydown', enterSpin);
+repoUrlInput.addEventListener('keydown', enterSpin);
 branchInput.addEventListener('keydown', enterSpin);
+
+// Function to render sessions and their actions
+async function loadSessions() {
+  try {
+    const res = await fetch('/api/sessions', { headers: authHeaders() });
+    const sessions = await res.json();
+    if (sessions.length === 0) {
+      sessionsList.innerHTML = '<div class="empty">No active sessions. Spin one up above.</div>';
+      return;
+    }
+    let html = '<table><thead><tr><th>Repository</th><th>Branch</th><th>Started</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+
+    for (const s of sessions) {
+      const status = s.status || 'running'; // Default to running if status is missing
+      const dotClass = status === 'running' ? 'status-dot'
+                       : status === 'paused' ? 'status-dot-paused'
+                       : 'status-dot-stopped'; // Default for stopped, killed, error
+      const badgeClass = 'badge-' + status;
+
+      let actions = '';
+      // Generate action buttons with unique IDs for state management
+      if (status === 'running') {
+        actions = `<button class="btn btn-warning btn-sm" id="pause-${s.id}" onclick="pauseSession('${s.id}')">Pause</button>`;
+      } else if (status === 'paused') {
+        if (s.cloud_session_id) { // Only allow resume if there's a cloud session ID
+          actions += `<button class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
+        }
+        actions += `<button class="btn btn-danger btn-sm" id="kill-${s.id}" onclick="killSession('${s.id}')">Kill</button>`;
+      } else if (status === 'stopped' || status === 'error') {
+        if (s.cloud_session_id) {
+          actions += `<button class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
+        }
+        actions += `<button class="btn btn-danger btn-sm" id="kill-${s.id}" onclick="killSession('${s.id}')">Kill</button>`;
+      } else { // For 'killed' or any other terminal status
+        actions = `<span class="badge badge-killed">Killed</span>`; // Show as killed if state is terminal
+        if (s.exit_code != null) {
+            actions += ` <span style="color:#64748b;font-size:0.8rem">Exit: ${s.exit_code}</span>`;
+        }
+      }
+
+      html += '<tr>' +
+              '<td><div class="repo">' + esc(s.repo_name) + '</div><div class="url">' + esc(s.repo_url) + '</div></td>' +
+              '<td style="color:#94a3b8;font-size:0.85rem">' + esc(s.branch || 'default') + '</td>' +
+              '<td style="color:#94a3b8;font-size:0.85rem">' + timeAgo(s.started_at) + '</td>' +
+              '<td><span class="' + dotClass + '"></span><span class="badge ' + badgeClass + '">' + esc(status) + '</span></td>' +
+              '<td style="text-align:right">' + actions + '</td>' +
+              '</tr>';
+    }
+    html += '</tbody></table>';
+    sessionsList.innerHTML = html;
+  } catch(e) {
+    // Ignore polling errors silently, but could log them
+    // console.error("Error loading sessions:", e);
+    sessionsList.innerHTML = '<div class="empty">Failed to load sessions.</div>';
+  }
+}
+
+
+// Initial load and polling
 loadSessions();
 loadDiag();
 loadLogs();
 checkAuth();
-setInterval(loadSessions, 3000);
-setInterval(loadDiag, 5000);
-setInterval(loadLogs, 5000);
+setInterval(loadSessions, 3000); // Poll sessions every 3 seconds
+setInterval(loadDiag, 5000);   // Poll diagnostics every 5 seconds
+setInterval(loadLogs, 5000);   // Poll logs every 5 seconds
 
 // ── Device Auth Flow ──────────────────────────────────────────────
 let authPollInterval = null;
@@ -333,51 +473,81 @@ async function checkAuth() {
     const flowEl = document.getElementById('authFlow');
     const actionsEl = document.getElementById('authActions');
 
+    // If authenticated, hide the auth card and return
     if (d.status === 'success') {
       card.style.display = 'none';
       return;
     }
 
-    // Show auth card if auth is not successful
+    // If not authenticated, ensure the auth card is visible
     card.style.display = 'block';
 
     if (d.status === 'pending') {
       showAuthFlow(d);
+      if (!authPollInterval) { // Start polling if not already done
+        authPollInterval = setInterval(pollAuth, 3000);
+      }
     } else if (d.status === 'failed') {
       statusEl.innerHTML = '<span style="color:#ef4444">' + esc(d.message || 'Authentication failed') + '</span>';
       flowEl.style.display = 'none';
       actionsEl.style.display = 'block';
+      if(document.getElementById('loginBtn')) document.getElementById('loginBtn').disabled = false;
     } else if (d.status === 'cancelled') {
       statusEl.innerHTML = '<span style="color:#f59e0b">Login cancelled</span>';
       flowEl.style.display = 'none';
       actionsEl.style.display = 'block';
-    } else {
+      if(document.getElementById('loginBtn')) document.getElementById('loginBtn').disabled = false;
+    } else { // Idle or initial state
       statusEl.innerHTML = '<span style="color:#94a3b8">Not authenticated. Click below to login.</span>';
       flowEl.style.display = 'none';
       actionsEl.style.display = 'block';
+      if(document.getElementById('loginBtn')) document.getElementById('loginBtn').disabled = false;
     }
-  } catch(e) { /* ignore */ }
+  } catch(e) {
+    console.error("Error checking auth status:", e); // Log to console for debugging
+    // Optionally show an error message to the user
+    document.getElementById('authStatus').innerHTML = '<span style="color:#ef4444">Could not check authentication status.</span>';
+    document.getElementById('authCard').style.display = 'block';
+    document.getElementById('authFlow').style.display = 'none';
+    document.getElementById('authActions').style.display = 'block';
+    if(document.getElementById('loginBtn')) document.getElementById('loginBtn').disabled = false;
+  }
 }
 
 function showAuthFlow(d) {
-  document.getElementById('authStatus').innerHTML = '';
+  document.getElementById('authStatus').innerHTML = ''; // Clear any previous status messages
   document.getElementById('authFlow').style.display = 'block';
   document.getElementById('authActions').style.display = 'none';
+
+  const urlEl = document.getElementById('authUrl');
+  const codeEl = document.getElementById('authCode');
+  const spinnerEl = document.getElementById('authSpinner');
+
   if (d.url) {
-    const urlEl = document.getElementById('authUrl');
     urlEl.href = d.url;
     urlEl.textContent = d.url;
   }
   if (d.code) {
-    document.getElementById('authCode').textContent = d.code;
+    codeEl.textContent = d.code;
   }
+
   if (d.status === 'success') {
-    document.getElementById('authSpinner').innerHTML =
-      '<span style="color:#22c55e;font-weight:600">Login successful! Reloading...</span>';
+    spinnerEl.innerHTML = '<span class="spinner"></span><span style="color:#22c55e;font-weight:600">Login successful! Reloading...</span>';
+    if (authPollInterval) clearInterval(authPollInterval); // Stop polling on success
+    authPollInterval = null;
     setTimeout(() => location.reload(), 2000);
   } else if (d.status === 'failed') {
-    document.getElementById('authSpinner').innerHTML =
-      '<span style="color:#ef4444">' + esc(d.message || 'Failed') + '</span>';
+    spinnerEl.innerHTML = '<span style="color:#ef4444">' + esc(d.message || 'Login failed') + '</span>';
+    if (authPollInterval) clearInterval(authPollInterval);
+    authPollInterval = null;
+    // Ensure login button is re-enabled
+    document.getElementById('loginBtn').disabled = false;
+  } else if (d.status === 'pending') {
+      spinnerEl.innerHTML = '<span class="spinner"></span><span style="color:#94a3b8;font-size:0.85rem">Waiting for authorization...</span>';
+  } else { // cancelled etc.
+     if (authPollInterval) clearInterval(authPollInterval);
+     authPollInterval = null;
+     document.getElementById('authActions').style.display = 'block'; // Show actions again
   }
 }
 
@@ -385,23 +555,20 @@ async function startAuth() {
   const btn = document.getElementById('loginBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>Starting...';
+
   try {
-    const res = await fetch('/api/auth/login', { method: 'POST' });
+    const res = await fetch('/api/auth/login', { method: 'POST', headers: authHeaders({'Content-Type': 'application/json'}) });
     const d = await res.json();
-    if (d.status === 'pending' || d.url) {
-      showAuthFlow(d);
-      // Start polling
-      if (authPollInterval) clearInterval(authPollInterval);
+    showAuthFlow(d); // Update UI based on response
+    if (d.status === 'pending' && !authPollInterval) {
       authPollInterval = setInterval(pollAuth, 3000);
-    } else {
-      document.getElementById('authStatus').innerHTML =
-        '<span style="color:#ef4444">' + esc(d.message || 'Failed to start login') + '</span>';
+    } else if (d.status !== 'pending') { // If not pending, stop spinner and re-enable
       btn.disabled = false;
       btn.textContent = 'Login to Kilo Gateway';
     }
   } catch(e) {
-    document.getElementById('authStatus').innerHTML =
-      '<span style="color:#ef4444">Network error: ' + esc(e.message) + '</span>';
+    console.error("Error starting auth:", e);
+    document.getElementById('authStatus').innerHTML = '<span style="color:#ef4444">Network error starting login: ' + esc(e.message) + '</span>';
     btn.disabled = false;
     btn.textContent = 'Login to Kilo Gateway';
   }
@@ -415,17 +582,32 @@ async function pollAuth() {
     if (d.status === 'success' || d.status === 'failed' || d.status === 'cancelled') {
       clearInterval(authPollInterval);
       authPollInterval = null;
+      // If flow completed with success, reload page. If failed/cancelled, ensure buttons are reset.
       if (d.status === 'success') {
         setTimeout(() => location.reload(), 2000);
+      } else {
+        // Ensure login button is re-enabled after failed/cancelled
+        document.getElementById('loginBtn').disabled = false;
       }
     }
-  } catch(e) { /* ignore */ }
+  } catch(e) {
+    console.error("Error polling auth status:", e);
+    // Optionally stop polling on repeated errors
+    // clearInterval(authPollInterval); authPollInterval = null;
+  }
 }
 
 async function cancelAuth() {
-  try { await fetch('/api/auth/cancel', { method: 'POST' }); } catch(e) {}
-  if (authPollInterval) { clearInterval(authPollInterval); authPollInterval = null; }
-  checkAuth();
+  try {
+    await fetch('/api/auth/cancel', { method: 'POST', headers: authHeaders() });
+  } catch(e) {
+    console.error("Error cancelling auth:", e);
+  }
+  if (authPollInterval) {
+    clearInterval(authPollInterval);
+    authPollInterval = null;
+  }
+  checkAuth(); // Refresh UI to reflect cancellation
 }
 </script>
 </body>

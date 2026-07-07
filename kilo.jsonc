@@ -1,6 +1,14 @@
 {
   "$schema": "https://app.kilo.ai/config.json",
   "small_model": "kilo/kilo-auto/free",
+  "instructions": [
+    ".kilo/rules/*.md"
+  ],
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "tail_turns": 8
+  },
   "indexing": {
     "enabled": true,
     "provider": "openai-compatible",
@@ -19,7 +27,22 @@
     "dimension": 1024
   },
   "permission": {
+    "webfetch": "deny",
+    "websearch": "deny",
+    "github_*": "ask",
+    "github_get_file_contents": "allow",
+    "github_list_commits": "allow",
+    "github_list_branches": "allow",
+    "github_list_pull_requests": "allow",
+    "github_list_issues": "allow",
+    "github_create_issue": "allow",
+    "github_create_branch": "allow",
+    "github_delete_repository": "deny",
+    "github_delete_file": "deny",
+    "github_delete_issue": "deny",
     "bash": {
+      "git push": "ask",
+      "git*push": "ask",
       "*": "allow",
       "curl *": "allow",
       "tail *": "allow"
@@ -38,6 +61,23 @@
       "type": "remote",
       "url": "https://search.parallel.ai/mcp",
       "enabled": true
+    },
+    "github": {
+      "type": "local",
+      "command": ["github-mcp-server"],
+      "environment": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_TOKEN}"
+      },
+      "enabled": true
+    }
+  },
+  "provider": {
+    "OpenRouter": {
+      "name": "OpenRouter",
+      "options": {
+        "baseURL": "https://openrouter.ai/api/v1",
+        "apiKey": "{env:OPENROUTER_API_KEY}"
+      }
     }
   }
 }

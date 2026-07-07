@@ -1,20 +1,10 @@
----
-title: Agent Dock
-emoji: 🏛️
-colorFrom: gray
-colorTo: yellow
-sdk: docker
-app_port: 7860
-pinned: false
----
-
-## What this Space does
+## What Agent Dock does
 
 Agent Dock is a web UI and REST API that orchestrates [Kilo CLI](https://kilo.ai)
 sessions for the Cloud Dashboard at `https://app.kilo.ai/cloud`. Spin up an
 interactive PTY session from any Git repo — the session connects to the Cloud
 Dashboard via WebSocket relay, so you can send prompts from the Dashboard and
-have them executed on the HF Space. Pause, resume, and kill sessions through
+have them executed on the host. Pause, resume, and kill sessions through
 the API or the browser-based management UI at `GET /`.
 
 ## Quick start
@@ -28,9 +18,9 @@ docker run -p 7860:7860 -e AGENT_DOCK_API_TOKEN=... agent-dock
 ## API security model
 
 - **Bearer-token auth** — every gated endpoint requires `Authorization: Bearer <AGENT_DOCK_API_TOKEN>` or `X-Agent-Dock-Token: <AGENT_DOCK_API_TOKEN>`. Compared in constant time via `crypto.timingSafeEqual`.
-- **X-Agent-Dock-Token fallback** — for use behind HF private-space proxy, which consumes the `Authorization` header for HF token auth.
+- **X-Agent-Dock-Token fallback** — for use behind a reverse proxy that consumes the `Authorization` header for its own authentication.
 - **Per-IP rate limits** — `express-rate-limit` with `trust proxy: 1`.
-- **Web UI token injection** — `GET /` embeds the token as `window.__HERMES_TOKEN__`. Only safe while the Space is private.
+- **Web UI token injection** — `GET /` embeds the token as `window.__HERMES_TOKEN__`. Only safe while the deployment is not publicly exposed.
 - **Token bootstrap** — if `AGENT_DOCK_API_TOKEN` is unset, a 48-char hex token is generated at boot (length logged, never the value).
 - **Rate-limit escape hatch** — set `AGENT_DOCK_RATE_LIMIT=off` to disable all limiters.
 
@@ -64,8 +54,46 @@ docker run -p 7860:7860 -e AGENT_DOCK_API_TOKEN=... agent-dock
 | `AGENT_DOCK_DEFAULT_MODEL` | `kilo/kilo-auto/free` | Model for sessions (set in `kilo.json`) |
 | `AGENT_DOCK_SMALL_MODEL` | `kilo/kilo-auto/free` | Model for background tasks (titles, summaries) |
 | `AGENT_DOCK_INITIAL_PROMPT` | `based on readme explain project in 2 lines` | Initial prompt sent on spin-up |
-| `GITHUB_TOKEN` | – | Used for cloning private repos |
+| `GITHUB_TOKEN` | – | Clones private repos AND authenticates agent `git push` to github.com (via a `url.insteadOf` rewrite configured at startup). Without it, pushes to github.com fail with "no stored credentials". |
 | `KILO_API_KEY` | – | Kilo auth; written to `auth.json` on boot |
+
+## Secrets
+
+Configuration is supplied via environment variables. You can pass each key
+individually with `-e`, or bundle them all into a single `HF_SECRETS`
+environment variable whose value is a JSON blob — the entrypoint parses that
+blob and exports each key so the `{env:VAR}` placeholders in `kilo.jsonc`
+resolve. This works identically whether you run the image locally, on a VM, or
+in any container orchestrator.
+
+### Keys
+| Key | Used for | Required? |
+|---|---|---|
+| `AGENT_DOCK_API_TOKEN` | Bearer auth for the API/UI. Auto-generated if omitted. | optional |
+| `KILO_API_KEY` | Kilo Cloud auth (relay to Dashboard). | recommended |
+| `GITHUB_TOKEN` | Clone private repos + authenticate `git push` to github.com. | optional* |
+| `CONTEXT7_API_KEY` | `context7` MCP server header. | optional |
+| `OPENROUTER_API_KEY` | OpenRouter provider (model access). | optional |
+| `GEMINI_API_KEY` | Gemini embedding provider for indexing. | optional |
+| `JINA_API_KEY` | Jina openai-compatible embedding provider for indexing. | optional |
+
+\* Without `GITHUB_TOKEN`, agent pushes to github.com fail with "no stored credentials".
+
+### Example: single JSON blob (`HF_SECRETS`)
+```bash
+docker run -p 7860:7860 \
+  -e HF_SECRETS='{"AGENT_DOCK_API_TOKEN":"...","KILO_API_KEY":"...","GITHUB_TOKEN":"ghp_...","CONTEXT7_API_KEY":"ctx7sk-...","OPENROUTER_API_KEY":"sk-or-...","GEMINI_API_KEY":"AIza...","JINA_API_KEY":"jina_..."}' \
+  agent-dock
+```
+
+### Example: individual `-e` flags
+```bash
+docker run -p 7860:7860 \
+  -e AGENT_DOCK_API_TOKEN=... -e KILO_API_KEY=... -e GITHUB_TOKEN=... \
+  -e CONTEXT7_API_KEY=... -e OPENROUTER_API_KEY=... \
+  -e GEMINI_API_KEY=... -e JINA_API_KEY=... \
+  agent-dock
+```
 
 ## Session lifecycle
 
