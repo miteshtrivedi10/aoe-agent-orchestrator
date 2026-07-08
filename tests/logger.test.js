@@ -117,27 +117,37 @@ describe("logger", () => {
   });
 
   describe("waitForString", () => {
-    it("resolves true when needle found", async () => {
+    it("resolves matched=true when needle found", async () => {
       let text = "";
       const promise = logger.waitForString(() => text, "test", 2, ["hello"]);
       setTimeout(() => { text = "some text hello world"; }, 100);
       const result = await promise;
-      assert.equal(result, true);
+      assert.equal(result.matched, true);
+      assert.equal(result.dead, false);
+      assert.equal(result.timedOut, false);
     });
 
-    it("resolves false on timeout", async () => {
+    it("resolves timedOut=true on timeout", async () => {
       const result = await logger.waitForString(() => "nothing", "test", 0.2, ["needle"]);
-      assert.equal(result, false);
+      assert.equal(result.matched, false);
+      assert.equal(result.dead, false);
+      assert.equal(result.timedOut, true);
+    });
+
+    it("resolves dead=true when isAliveFn returns false", async () => {
+      const result = await logger.waitForString(() => "nothing at all", "test", 5, ["needle"], () => false);
+      assert.equal(result.matched, false);
+      assert.equal(result.dead, true);
+      assert.equal(result.timedOut, false);
     });
 
     it("skips already-seen portions", async () => {
       let text = "initial text";
-      // Wait for needle to appear in new data only
       const promise = logger.waitForString(() => text, "test", 2, ["new"]);
       setTimeout(() => { text = "initial text"; }, 100);
       setTimeout(() => { text = "initial textnew here"; }, 300);
       const result = await promise;
-      assert.equal(result, true);
+      assert.equal(result.matched, true);
     });
   });
 });

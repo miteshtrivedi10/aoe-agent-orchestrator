@@ -349,6 +349,43 @@ describe("server", () => {
       assert.equal(res.status, 409);
     });
 
+    it("starts fresh session when no cloud_session_id", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
+        { id: "test-noid", status: "paused", work_dir: "/tmp/test" },
+      ]);
+      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
+      mock.method(fs, "existsSync", () => true);
+      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "resumeKiloSession", () => Promise.resolve({ pid: 11111, started: true }));
+      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "startKiloSession", () => Promise.resolve({ pid: 22222, cloudSessionId: "ses_new", started: true }));
+
+      const res = await req(baseUrl, "POST", "/api/sessions/test-noid/resume", {
+        "Authorization": "Bearer test-server-token",
+      });
+      assert.equal(res.status, 202);
+      assert.equal(res.body.pid, 22222);
+      assert.equal(res.body.cloud_session_id, "ses_new");
+      assert.equal(res.body.status, "running");
+    });
+
+    it("starts fresh session when cloud session was deleted", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
+        { id: "test-del", status: "paused", cloud_session_id: "ses_deleted", work_dir: "/tmp/test" },
+      ]);
+      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
+      mock.method(fs, "existsSync", () => true);
+      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "resumeKiloSession", () => Promise.resolve({ pid: 33333, started: false, importFailed: true, reason: "cloud_session_deleted" }));
+      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "startKiloSession", () => Promise.resolve({ pid: 44444, cloudSessionId: "ses_fresh", started: true }));
+
+      const res = await req(baseUrl, "POST", "/api/sessions/test-del/resume", {
+        "Authorization": "Bearer test-server-token",
+      });
+      assert.equal(res.status, 202);
+      assert.equal(res.body.pid, 44444);
+      assert.equal(res.body.cloud_session_id, "ses_fresh");
+      assert.equal(res.body.cloud_session_deleted, true);
+      assert.ok(res.body.message.includes("deleted"));
+    });
+
     it("respawns TUI PTY via resumeKiloSession", async () => {
       mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
         { id: "test-resume", status: "paused", cloud_session_id: "ses_abc", work_dir: "/tmp/test" },

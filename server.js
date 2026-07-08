@@ -429,11 +429,6 @@ app.post("/api/sessions/:id/resume", authGate, writeLimiter, async (req, res) =>
   if (session.status === "killed") {
     return res.status(409).json({ error: "killed sessions cannot be resumed" });
   }
-  if (!session.cloud_session_id) {
-    return res.status(409).json({
-      error: "no cloud_session_id captured — cannot resume this session",
-    });
-  }
   if (!session.work_dir || !fs.existsSync(session.work_dir)) {
     return res.status(409).json({
       error: "work directory no longer exists — cannot resume",
@@ -448,20 +443,64 @@ app.post("/api/sessions/:id/resume", authGate, writeLimiter, async (req, res) =>
   } catch (e) {
     return res.status(500).json({ error: `resume failed: ${e.message}` });
   }
+
+  // If the cloud session was deleted from the Dashboard, the resume detected
+  // the import failure early and tore down the PTY. Start a fresh session in
+  // the same work directory — file changes are preserved because the repo is
+  // already checked out.
+  if (result.importFailed) {
+    log(`resume ${logPrefix(label)} cloud session deleted — starting fresh session in ${session.work_dir}`);
+    let freshResult;
+    try {
+      freshResult = await startKiloSession(session.work_dir, label);
+    } catch (e) {
+      return res.status(500).json({ error: `failed to start fresh session: ${e.message}` });
+    }
+    session.status = "running";
+    session.pid = freshResult.pid;
+    session.cloud_session_id = freshResult.cloudSessionId || null;
+    session.started_at = new Date().toISOString();
+    session.resume_count = (session.resume_count || 0) + 1;
+    session.cloud_session_deleted = true;
+    saveSessions(sessions);
+
+    return res.status(202).json({
+      session_id: label,
+      cloud_session_id: session.cloud_session_id,
+      pid: freshResult.pid,
+      status: session.status,
+      resumed_live: freshResult.started !== false,
+      message: "Cloud session was deleted. A new session has been created. Your file changes are preserved.",
+      cloud_session_deleted: true,
+    });
+  }
+
   const { pid, cloudSessionId } = result;
 
+  // `started` means the resumed TUI actually became interactive (prompt
+  // detected OR remote-ws connected). When it is false the process may still be
+  // alive but it is NOT controllable from the Cloud Dashboard. We keep the pid
+  // (so liveness polling + onExit still track it) but flag the non-interactive
+  // state so the failure surfaces instead of looking like a healthy session.
+  const resumedLive = result.started === true;
   session.status = "running";
   session.pid = pid;
   session.cloud_session_id = cloudSessionId || session.cloud_session_id;
   session.started_at = new Date().toISOString();
   session.resume_count = (session.resume_count || 0) + 1;
+  if (!resumedLive) {
+    session.resume_warning = result.reason || "resume did not reach an interactive TUI";
+    log(`resume ${logPrefix(label)} WARNING — session NOT live/interactive (${session.resume_warning})`);
+  }
   saveSessions(sessions);
 
-  return res.status(202).json({
+  return res.status(resumedLive ? 202 : 200).json({
     session_id: label,
     cloud_session_id: session.cloud_session_id,
     pid,
-    status: "running",
+    status: session.status,
+    resumed_live: resumedLive,
+    reason: result.reason || null,
   });
 });
 

@@ -943,14 +943,10 @@ async function loadSessions() {
       if (status === 'running') {
         actions = `<button type="button" class="btn btn-warning btn-sm" id="pause-${s.id}" onclick="pauseSession('${s.id}')">Pause</button>`;
       } else if (status === 'paused') {
-        if (s.cloud_session_id) { // Only allow resume if there's a cloud session ID
-          actions += `<button type="button" class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
-        }
+        actions += `<button type="button" class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
         actions += `<button type="button" class="btn btn-danger btn-sm" id="kill-${s.id}" onclick="killSession('${s.id}')">Kill</button>`;
       } else if (status === 'stopped' || status === 'error') {
-        if (s.cloud_session_id) {
-          actions += `<button type="button" class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
-        }
+        actions += `<button type="button" class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
         actions += `<button type="button" class="btn btn-danger btn-sm" id="kill-${s.id}" onclick="killSession('${s.id}')">Kill</button>`;
       } else { // For 'killed' or any other terminal status
         actions = `<span class="badge badge-killed">Killed</span>`; // Show as killed if state is terminal

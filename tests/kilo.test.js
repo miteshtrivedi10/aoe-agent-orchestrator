@@ -144,6 +144,51 @@ describe("kilo", () => {
       mock.restoreAll();
     });
 
+    it("detects session.turn.open publishing", () => {
+      mock.method(fs, "readdirSync", () => ["sess.log"]);
+      mock.method(fs, "statSync", () => ({ mtimeMs: Date.now() }));
+      mock.method(fs, "readFileSync", () => "session.turn.open publishing ses_abc123");
+      const result = kilo.scanInternalLogs(0);
+      assert.equal(result.sessionCreated, true);
+      mock.restoreAll();
+    });
+
+    it("detects session.initialized", () => {
+      mock.method(fs, "readdirSync", () => ["sess.log"]);
+      mock.method(fs, "statSync", () => ({ mtimeMs: Date.now() }));
+      mock.method(fs, "readFileSync", () => "session.initialized with model xyz");
+      const result = kilo.scanInternalLogs(0);
+      assert.equal(result.sessionCreated, true);
+      mock.restoreAll();
+    });
+
+    it("detects creating session phrase", () => {
+      mock.method(fs, "readdirSync", () => ["sess.log"]);
+      mock.method(fs, "statSync", () => ({ mtimeMs: Date.now() }));
+      mock.method(fs, "readFileSync", () => "creating session and registering ingest");
+      const result = kilo.scanInternalLogs(0);
+      assert.equal(result.sessionCreated, true);
+      mock.restoreAll();
+    });
+
+    it("detects session.ingest start", () => {
+      mock.method(fs, "readdirSync", () => ["sess.log"]);
+      mock.method(fs, "statSync", () => ({ mtimeMs: Date.now() }));
+      mock.method(fs, "readFileSync", () => "session.ingest started for ses_xxxx");
+      const result = kilo.scanInternalLogs(0);
+      assert.equal(result.sessionCreated, true);
+      mock.restoreAll();
+    });
+
+    it("does NOT flag unrelated log lines as sessionCreated", () => {
+      mock.method(fs, "readdirSync", () => ["sess.log"]);
+      mock.method(fs, "statSync", () => ({ mtimeMs: Date.now() }));
+      mock.method(fs, "readFileSync", () => "some random log line without markers");
+      const result = kilo.scanInternalLogs(0);
+      assert.equal(result.sessionCreated, false);
+      mock.restoreAll();
+    });
+
     it("filters files by mtime (sinceMs)", () => {
       const oldTime = Date.now() - 3600000; // 1 hour ago
       mock.method(fs, "readdirSync", () => ["old.log", "new.log"]);
@@ -303,6 +348,48 @@ describe("kilo", () => {
     });
   });
 
+  describe("checkPtyAlive", () => {
+    it("returns null when pid is alive (current process)", () => {
+      const reason = kilo.checkPtyAlive(process.pid, "test", "_test", "some output");
+      assert.equal(reason, null);
+    });
+
+    it("returns diagnostic string when pid is dead", () => {
+      const reason = kilo.checkPtyAlive(99999999, "dead-session", "_resume", "partial TUI output");
+      assert.ok(reason, "should return a non-null reason string");
+      assert.ok(reason.includes("PTY process"), "should mention PTY process");
+      assert.ok(reason.includes("99999999"), "should include the pid");
+      assert.ok(reason.includes("died during"), "should mention where it died");
+      assert.ok(reason.includes("_resume"), "should include the tag");
+    });
+
+    it("returns diagnostic string for null/zero pid", () => {
+      const reason = kilo.checkPtyAlive(null, "null-session", "_test", "");
+      assert.ok(reason, "should return a non-null reason string");
+      assert.ok(reason.includes("unknown"), "should mention unknown pid");
+    });
+
+    it("logs the PTY tail when accumulated has content", () => {
+      const logs = console.log.mock.calls.map(c => c.arguments.join(" "));
+      const beforeCount = logs.length;
+      kilo.checkPtyAlive(99999999, "t", "_t", "kilogotimmediatelykilled");
+      const after = console.log.mock.calls.map(c => c.arguments.join(" "));
+      assert.ok(after.length > beforeCount, "should log tail output");
+      const newLogs = after.slice(beforeCount);
+      assert.ok(newLogs.some(l => l.includes("PTY tail")), "should log PTY tail");
+      assert.ok(newLogs.some(l => l.includes("kilogotimmediatelykilled")), "should include accumulated buffer");
+    });
+
+    it("logs empty when accumulated buffer is empty", () => {
+      const logs = console.log.mock.calls.map(c => c.arguments.join(" "));
+      const beforeCount = logs.length;
+      kilo.checkPtyAlive(99999999, "t", "_t", "");
+      const after = console.log.mock.calls.map(c => c.arguments.join(" "));
+      const newLogs = after.slice(beforeCount);
+      assert.ok(newLogs.some(l => l.includes("PTY buffer empty")), "should log empty buffer");
+    });
+  });
+
   describe("checkGateway", () => {
     it("logs reachable when fetch succeeds", async () => {
       global.fetch = mock.fn(() => Promise.resolve({ status: 200 }));
@@ -319,6 +406,34 @@ describe("kilo", () => {
       const logs = console.log.mock.calls.map(c => c.arguments.join(" "));
       assert.ok(logs.some(l => l.includes("UNREACHABLE")));
       delete global.fetch;
+    });
+  });
+
+  describe("CLOUD_SESSION_IMPORT_FAILED_RE", () => {
+    it("matches 'Failed to import session from cloud'", () => {
+      const re = /failed to import session from cloud/i;
+      assert.ok(re.test("Error: Failed to import session from cloud"));
+      assert.ok(re.test("Importing session from cloud... Error: Failed to import session from cloud"));
+    });
+
+    it("does not match unrelated errors", () => {
+      const re = /failed to import session from cloud/i;
+      assert.ok(!re.test("authentication failed"));
+      assert.ok(!re.test("command not found"));
+      assert.ok(!re.test("session created successfully"));
+    });
+  });
+
+  describe("detectKiloStartupErrors — import failure not a startup error", () => {
+    it("does NOT match 'Failed to import session from cloud'", () => {
+      const result = kilo.detectKiloStartupErrors("Error: Failed to import session from cloud");
+      assert.equal(result, null, "import failure should not be treated as a startup error");
+    });
+
+    it("still matches actual startup errors like UNAUTHENTICATED", () => {
+      const result = kilo.detectKiloStartupErrors("401 UNAUTHENTICATED");
+      assert.ok(result, "should detect UNAUTHENTICATED");
+      assert.ok(result.includes("UNAUTHENTICATED"));
     });
   });
 });
