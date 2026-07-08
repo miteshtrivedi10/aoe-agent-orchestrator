@@ -57,6 +57,8 @@ app.get("/", (_req, res) => {
   res.send(html);
 });
 
+app.get("/health", (_req, res) => res.status(200).send("ok"));
+
 app.get("/api/status", (_req, res) => {
   // NOTE: This must NOT spawn any kilo process. Version/path are cached at boot.
   // Spawning kilo per-poll floods the internal log dir (rotating out the live
@@ -96,10 +98,10 @@ app.get("/api/status", (_req, res) => {
   });
 });
 
-app.get("/api/logs/session/:id", authGate, readLimiter, (req, res) => {
+app.get("/api/logs/session/:id", authGate, readLimiter, async (req, res) => {
   try {
     const logFile = path.join(KILO_DIR, `session-${req.params.id}.log`);
-    const raw = fs.readFileSync(logFile, "utf8");
+    const raw = await fs.promises.readFile(logFile, "utf8");
     const clean = stripAnsi(raw);
     const lines = clean.split("\n").filter(Boolean).slice(-200);
     res.json({ lines, raw_length: raw.length, clean_length: clean.length });
@@ -108,14 +110,14 @@ app.get("/api/logs/session/:id", authGate, readLimiter, (req, res) => {
   }
 });
 
-app.get("/api/logs/kilo-internal", authGate, readLimiter, (_req, res) => {
+app.get("/api/logs/kilo-internal", authGate, readLimiter, async (_req, res) => {
   try {
     const logDir = path.join(KILO_DIR, "log");
-    const files = fs.readdirSync(logDir);
+    const files = await fs.promises.readdir(logDir);
     const result = {};
     for (const f of files) {
       try {
-        const content = fs.readFileSync(path.join(logDir, f), "utf8");
+        const content = await fs.promises.readFile(path.join(logDir, f), "utf8");
         result[f] = content.split("\n").filter(Boolean).slice(-100);
       } catch (_) {}
     }
