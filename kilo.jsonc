@@ -78,6 +78,13 @@
       "options": {
         "apiKey": "{env:OPENROUTER_API_KEY}"
       }
+    },
+    "IAMHC": {
+      "name": "IAMHC",
+      "options": {
+        "baseURL": "https://api.iamhc.cn/v1",
+        "apiKey": "{env:IAMHC_API_KEY}"
+      }
     }
   }
 }

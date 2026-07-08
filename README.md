@@ -40,7 +40,7 @@ All configuration is passed via environment variables. You can pass each key ind
 | `GIT_USER_EMAIL` | optional | Git committer email. Required by `git commit` and pre-commit hooks. Default: `agent-dock@local`. |
 | `CONTEXT7_API_KEY` | optional | API key for the Context7 MCP server. Enables the agent to query live library documentation during sessions. |
 | `OPENROUTER_API_KEY` | optional | OpenRouter provider key. Grants access to additional models (Claude, GPT-4, etc.) through OpenRouter's API. |
-| `OPENCODE_API_KEY` | optional | OpenCode provider key (zen/v1 endpoint). Alternative model access. |
+| `OPENCODE_API_KEY` | optional | OpenCode provider key (zen/v1 endpoint). Auto-activates kilo's native `opencode` provider. |
 | `GEMINI_API_KEY` | optional | Google Gemini key. Used for embedding-based code indexing. |
 | `JINA_API_KEY` | optional | Jina openai-compatible embedding provider for indexing. |
 
@@ -174,9 +174,12 @@ The `${env:VAR}` syntax pulls values from environment variables at runtime. Any 
 To use a model provider other than the default Kilo backend:
 
 1. Set the provider's API key as an environment variable (e.g. `OPENROUTER_API_KEY`).
-2. Set `AGENT_DOCK_DEFAULT_MODEL` to the model ID from that provider (e.g. `openrouter/anthropic/claude-sonnet-4-20250514`).
+2. Declare the provider in `kilo.jsonc` under `provider.<id>.options` with `apiKey` (`{env:VAR}` syntax) and, for custom OpenAI-compatible endpoints, `baseURL`.
+3. Set `AGENT_DOCK_DEFAULT_MODEL` to the model ID from that provider (e.g. `openrouter/anthropic/claude-sonnet-4-20250514`).
 
 Agent Dock passes the model selection to Kilo at session start. Kilo handles the actual API calls.
+
+**Cloud Dashboard visibility.** Every provider declared in `kilo.jsonc` — including custom OpenAI-compatible ones with a `baseURL` — is relayed to the Kilo Cloud Dashboard's model picker for `/remote` sessions via the `list_models` protocol (kilo 7.4.x, PR Kilo-Org/cloud#4325 + Kilo-Org/kilocode#11835). Inference still runs in this container against the provider's `baseURL`; the dashboard is only a remote view/control surface. So a session started from the Agent Dock UI can be resumed from the Cloud Dashboard or mobile app, and the user can switch models from any of those surfaces.
 
 ### Adding rules
 
