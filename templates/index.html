@@ -908,9 +908,10 @@ async function loadLogs() {
     const res = await fetch('/api/logs?n=100', { headers: authHeaders() });
     const d = await res.json();
     const el = document.getElementById('logPanel');
-    // Reverse logs to show most recent first, join with newlines
     el.innerHTML = d.lines.slice().reverse().map(l => esc(l)).join('\n');
-    el.scrollTop = el.scrollHeight; // Auto-scroll to bottom
+    if (!el._userScrolled) {
+      el.scrollTop = 0;
+    }
   } catch(e) {
     document.getElementById('logPanel').innerHTML = '<div class="empty">Error loading logs: ' + esc(e.message) + '</div>';
   }
@@ -986,6 +987,9 @@ checkAuth();
 setInterval(loadSessions, 3000); // Poll sessions every 3 seconds
 setInterval(loadDiag, 5000);   // Poll diagnostics every 5 seconds
 setInterval(loadLogs, 5000);   // Poll logs every 5 seconds
+document.getElementById('logPanel').addEventListener('scroll', function() {
+  this._userScrolled = this.scrollTop > 30;
+});
 
 // ── Device Auth Flow ──────────────────────────────────────────────
 let authPollInterval = null;
