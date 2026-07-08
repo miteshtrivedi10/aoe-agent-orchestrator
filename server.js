@@ -245,7 +245,7 @@ app.get("/api/sessions", authGate, readLimiter, (_req, res) => {
 app.post("/api/spin-up", authGate, writeLimiter, async (req, res) => {
   const data = req.body || {};
   const repoUrl = (data.repo_url || "").trim();
-  const branch = (data.branch || "").trim();
+  const branch = (data.branch || "").trim() || "main";
 
   if (!repoUrl) {
     return res.status(400).json({ error: "repo_url required" });
@@ -254,11 +254,6 @@ app.post("/api/spin-up", authGate, writeLimiter, async (req, res) => {
     return res.status(400).json({
       error: "repo_url must end in .git — e.g. https://github.com/owner/repo.git or git@github.com:owner/repo.git",
       received: repoUrl,
-    });
-  }
-  if (!branch) {
-    return res.status(400).json({
-      error: "branch required — pick the branch you want this session to work on (e.g. 'main')",
     });
   }
   if (!BRANCH_RE.test(branch)) {

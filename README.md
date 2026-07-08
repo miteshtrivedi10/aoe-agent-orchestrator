@@ -1,6 +1,6 @@
 ## What is Agent Dock
 
-Agent Dock is a self-hosted web UI and REST API that manages [Kilo CLI](https://kilo.ai) coding sessions. Give it a Git repository URL and a branch — it clones the repo, spins up an interactive Kilo session in a PTY, and connects it to the Kilo Cloud Dashboard via WebSocket relay. From there you can send prompts, pause/resume work, kill sessions, and view logs, all from the browser.
+Agent Dock is a self-hosted web UI and REST API that manages [Kilo CLI](https://kilo.ai) coding sessions. Give it a Git repository URL and optionally a branch (defaults to `main`) — it clones the repo, spins up an interactive Kilo session in a PTY, and connects it to the Kilo Cloud Dashboard via WebSocket relay. From there you can send prompts, pause/resume work, kill sessions, and view logs, all from the browser.
 
 The key value: sessions started through Agent Dock are not locked to the server. Once a session is live, it is available on the **Kilo Cloud Dashboard** (web) and the **Kilo mobile app**. You can start work on your machine, continue it from your phone on the train, and review the diff from the dashboard — no reconnection, no context loss. Agent Dock acts as the orchestration layer that creates and manages these sessions, while Kilo's own infrastructure handles the real-time sync across devices.
 
@@ -23,7 +23,7 @@ docker run -p 7860:7860 \
   agent-dock
 ```
 
-Open `http://localhost:7860` in your browser. Enter a repo URL and branch, click **Spin Up Agent**.
+Open `http://localhost:7860` in your browser. Enter a repo URL (branch defaults to `main`), click **Spin Up Agent**.
 
 ## Secrets
 
