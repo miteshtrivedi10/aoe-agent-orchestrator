@@ -2,7 +2,6 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const { spawn, execFileSync } = require("child_process");
-const crypto = require("crypto");
 
 const { log, logPrefix, LOG_RING, stripAnsi } = require("./lib/logger");
 const {
@@ -10,11 +9,10 @@ const {
   authGate, readLimiter, writeLimiter, authLimiter,
   inspectAuth, DEVICE_AUTH, runDeviceAuth,
 } = require("./lib/auth");
-const {
-  REPOS_DIR, GIT_URL_RE, BRANCH_RE,
-  loadSessions, saveSessions, updateStatus, terminateProcess, checkoutRepo, repoName,
-} = require("./lib/sessions");
-const { startKiloSession, resumeKiloSession, initKiloStartup, scanInternalLogs, sendPromptToLive, isLive, writeProjectConfig } = require("./lib/kilo");
+const reposLib = require("./lib/repos");
+const { REPOS_DIR, GIT_URL_RE, BRANCH_RE } = reposLib;
+const kiloLib = require("./lib/kilo");
+const { initKiloStartup, scanInternalLogs, sendPromptToLive, isLive, writeProjectConfig } = kiloLib;
 
 const app = express();
 app.set("trust proxy", 1);
@@ -24,19 +22,16 @@ app.disable("x-powered-by");
 
 const PORT = parseInt(process.env.PORT || "7860", 10);
 
-try { fs.mkdirSync(path.dirname("/data/sessions.json"), { recursive: true }); } catch (_) {}
+try { fs.mkdirSync(path.dirname("/data/repos.json"), { recursive: true }); } catch (_) {}
 try { fs.mkdirSync(REPOS_DIR, { recursive: true }); } catch (_) {}
 
 let INDEX_HTML = "";
 try { INDEX_HTML = fs.readFileSync(path.join(__dirname, "templates", "index.html"), "utf8"); } catch (_) {}
 
-// Cache kilo version + path ONCE at boot. Previously /api/status shelled out to
-// `kilo --version` and `kilo daemon status` on EVERY poll. The UI polls status
-// frequently, so each poll spawned kilo processes that (a) flooded the internal
-// log dir — kilo keeps only ~11 log files, so the live TUI session's log (with
-// the ses_ cloud id + ingest breadcrumbs) got rotated out within a minute, and
-// (b) caused lock contention with the live TUI. We no longer run a daemon (the
-// TUI manages its own server/ingest/remote WebSocket), so daemon status is dead.
+// Cache kilo version + path ONCE at boot. Previously /api/status shelled out
+// to `kilo --version` and `kilo daemon status` on EVERY poll. The UI polls
+// status frequently, so each poll spawned kilo processes that flooded the
+// internal log dir (rotating out the live TUI session log we need to scan).
 let KILO_VERSION = "unknown";
 let KILO_WHICH = null;
 try {
@@ -47,7 +42,24 @@ try {
 } catch (_) {}
 log(`boot kilo version=${KILO_VERSION} which=${KILO_WHICH || "not found"} (cached at boot — /api/status will NOT re-spawn kilo)`);
 
-// ── Routes ───────────────────────────────────────────────────────
+// ── Small helpers ────────────────────────────────────────────────────
+
+// Q6: Auth pre-flight check. Returns a 409-ready error body if auth is
+// invalid, otherwise null. Used by checkout / start / new-session so we
+// never spawn a kilo PTY that's destined to die at the cloud-provider
+// validation step (root cause of the original 361ce879/21:44 incident).
+function authPreflight() {
+  const auth = inspectAuth();
+  if (!auth.valid) {
+    return {
+      error: `auth invalid — complete login on the Auth tab first (reason: ${auth.reason})`,
+      auth_invalid: true,
+    };
+  }
+  return null;
+}
+
+// ── Routes ───────────────────────────────────────────────────────────
 
 app.get("/", (_req, res) => {
   if (!INDEX_HTML) return res.status(500).send("index.html unavailable");
@@ -60,16 +72,15 @@ app.get("/", (_req, res) => {
 app.get("/health", (_req, res) => res.status(200).send("ok"));
 
 app.get("/api/status", (_req, res) => {
-  // NOTE: This must NOT spawn any kilo process. Version/path are cached at boot.
-  // Spawning kilo per-poll floods the internal log dir (rotating out the live
-  // TUI session log we need to scan) and causes TUI lock contention.
+  // NOTE: This must NOT spawn any kilo process. Version/path are cached at
+  // boot (spawning flood-rotates the live TUI log we scan for the cloud id).
   const result = {
     kilo_version: KILO_VERSION,
     kilo_which: KILO_WHICH,
-    daemon_running: false, // no daemon in this architecture — TUI self-manages
+    daemon_running: false,
     auth_exists: false,
     repos_dir_exists: fs.existsSync(REPOS_DIR),
-    session_count: loadSessions().length,
+    repo_count: reposLib.loadRepos().length,
     default_model: null,
     small_model: null,
   };
@@ -100,6 +111,7 @@ app.get("/api/status", (_req, res) => {
 
 app.get("/api/logs/session/:id", authGate, readLimiter, async (req, res) => {
   try {
+    // `id` is the bucket work_dir_identifier (e.g. "xyz"), not a session id.
     const logFile = path.join(KILO_DIR, `session-${req.params.id}.log`);
     const raw = await fs.promises.readFile(logFile, "utf8");
     const clean = stripAnsi(raw);
@@ -159,11 +171,11 @@ app.get("/api/relay-check", authGate, readLimiter, async (_req, res) => {
   } catch (_) {}
 
   let verdict;
-  if (!auth.valid)          verdict = `BLOCKED: ${auth.reason}`;
-  else if (!apiCheck.reachable) verdict = "BLOCKED: api.kilo.ai unreachable";
+  if (!auth.valid)               verdict = `BLOCKED: ${auth.reason}`;
+  else if (!apiCheck.reachable)  verdict = "BLOCKED: api.kilo.ai unreachable";
   else if (apiCheck.auth_invalid) verdict = "BLOCKED: api.kilo.ai rejected credentials (401) — re-auth required";
   else if (!ingestCheck.reachable) verdict = "BLOCKED: ingest.kilosessions.ai unreachable — relay will fail";
-  else                       verdict = "OK: per-PTY session with KILO_REMOTE=1 will appear in Cloud Dashboard";
+  else                          verdict = "OK: per-PTY session with KILO_REMOTE=1 will appear in Cloud Dashboard";
 
   res.json({
     verdict,
@@ -199,9 +211,6 @@ app.get("/api/relay-check", authGate, readLimiter, async (_req, res) => {
 });
 
 app.get("/api/diagnostics", authGate, readLimiter, async (_req, res) => {
-  // Must NOT spawn kilo (no daemon in this architecture; spawning floods the
-  // internal log dir and contends with the live TUI). Reports auth + the latest
-  // kilo-sessions ingest/remote breadcrumbs scanned from the internal logs.
   const auth = inspectAuth();
   const diag = {
     daemon_running: false,
@@ -235,21 +244,32 @@ app.get("/api/logs", authGate, readLimiter, (req, res) => {
   res.json({ count: lines.length, lines });
 });
 
-app.get("/api/sessions", authGate, readLimiter, (_req, res) => {
-  const sessions = updateStatus(loadSessions());
-  try { saveSessions(sessions); }
-  catch (e) { log(`_persist_sessions write failed (non-fatal): ${e.message}`); }
-  res.json(sessions);
+// ── Repo bucket endpoints (replaces old /api/sessions* and /api/spin-up) ──
+
+app.get("/api/repos", authGate, readLimiter, (_req, res) => {
+  const repos = reposLib.updateStatus(reposLib.loadRepos());
+  try { reposLib.saveRepos(repos); }
+  catch (e) { log(`_persist_repos write failed (non-fatal): ${e.message}`); }
+  res.json(repos);
 });
 
-app.post("/api/spin-up", authGate, writeLimiter, async (req, res) => {
+app.get("/api/repos/:workDirId", authGate, readLimiter, (req, res) => {
+  const repos = reposLib.updateStatus(reposLib.loadRepos());
+  const bucket = reposLib.findBucket(repos, req.params.workDirId);
+  if (!bucket) return res.status(404).json({ error: "repo bucket not found" });
+  res.json(bucket);
+});
+
+// POST /api/repos/checkout — clones the repo into /data/repos/<repo> and
+// spawns a fresh kilo TUI session in it. Idempotent re-checkout returns 409
+// "already checked out"; collision against a different repo_url returns 409
+// "bucket collision — different repo_url".
+app.post("/api/repos/checkout", authGate, writeLimiter, async (req, res) => {
   const data = req.body || {};
   const repoUrl = (data.repo_url || "").trim();
   const branch = (data.branch || "").trim() || "main";
 
-  if (!repoUrl) {
-    return res.status(400).json({ error: "repo_url required" });
-  }
+  if (!repoUrl) return res.status(400).json({ error: "repo_url required" });
   if (!GIT_URL_RE.test(repoUrl)) {
     return res.status(400).json({
       error: "repo_url must end in .git — e.g. https://github.com/owner/repo.git or git@github.com:owner/repo.git",
@@ -263,121 +283,252 @@ app.post("/api/spin-up", authGate, writeLimiter, async (req, res) => {
     });
   }
 
-  const sessionId = crypto.randomUUID().slice(0, 8);
-  const repo = repoName(repoUrl);
-  const label = sessionId;
-  log(`spin-up session=${label} repo=${repo} branch=${branch}`);
+  const pre = authPreflight();
+  if (pre) return res.status(409).json(pre);
+
+  const workDirId = reposLib.bucketIdentifier(repoUrl);
+
+  const existing = reposLib.findBucket(reposLib.loadRepos(), workDirId);
+  if (existing) {
+    if (existing.repo_url !== repoUrl) {
+      log(`checkout ${logPrefix(workDirId)} BUCKET COLLISION — incoming ${repoUrl} vs existing ${existing.repo_url}`);
+      return res.status(409).json({
+        error: "bucket collision — different repo_url",
+        work_dir_identifier: workDirId,
+        existing_repo_url: existing.repo_url,
+      });
+    }
+    log(`checkout ${logPrefix(workDirId)} already checked out (state=${existing.session_state})`);
+    return res.status(409).json({
+      error: "already checked out",
+      work_dir_identifier: workDirId,
+      session_state: existing.session_state,
+      branch: existing.branch,
+    });
+  }
 
   let workDir;
   try {
-    const result = checkoutRepo(repoUrl, branch, sessionId);
+    const result = reposLib.checkoutRepo(repoUrl, branch, workDirId);
     workDir = result.workDir;
   } catch (e) {
-    return res.status(500).json({ error: "clone failed \u2014 check repo URL and access permissions" });
+    return res.status(500).json({ error: "clone failed — check repo URL and access permissions" });
   }
 
   let result;
   try {
-    result = await startKiloSession(workDir, label);
+    result = await kiloLib.startKiloSession(workDir, workDirId);
   } catch (e) {
     return res.status(500).json({ error: `session start failed: ${e.message}` });
   }
   const { pid: kiloPid, cloudSessionId } = result;
 
-  const session = {
-    id: sessionId,
-    repo_url: repoUrl,
-    repo_name: repo,
-    branch,
-    work_dir: workDir,
-    pid: kiloPid,
-    cloud_session_id: cloudSessionId || null,
-    status: "running",
-    started_at: new Date().toISOString(),
-  };
-
-  const sessions = updateStatus(loadSessions());
-  sessions.push(session);
-  saveSessions(sessions);
-  log(`spin-up ${logPrefix(label)} created id=${sessionId} pid=${kiloPid} branch=${branch}`);
+  const bucket = reposLib.newBucket({ repoUrl, branch, workDir, workDirId });
+  bucket.pid = kiloPid;
+  bucket.kilo_session_id = cloudSessionId || null;
+  bucket.is_active_in_agent_dock = true;
+  bucket.cloud_session_status = cloudSessionId ? "active" : "unknown";
   if (result.started === false) {
-    log(`spin-up ${logPrefix(label)} WARNING — kilo session did NOT confirm a created cloud session (reason=${result.reason})`);
+    bucket.session_state = "stopped";
+    bucket.stopped_at = new Date().toISOString();
+    bucket.is_active_in_agent_dock = false;
+    bucket.last_warning = result.reason || "kilo session did not reach an interactive prompt";
+    log(`checkout ${logPrefix(workDirId)} WARNING — kilo did NOT confirm a created cloud session (reason=${result.reason})`);
   }
-  res.status(201).json(session);
+
+  const repos = reposLib.updateStatus(reposLib.loadRepos());
+  // updateStatus may transit a stale stale running→stopped for an unrelated
+  // bucket; don't accidentally re-push the bucket we're inserting via that.
+  // Replace any existing entry with the same id just in case (it shouldn't
+  // exist — we checked above — but a concurrent checkout race in the same
+  // poll cycle could surface).
+  const without = repos.filter((r) => r.work_dir_identifier !== workDirId);
+  without.push(bucket);
+  reposLib.saveRepos(without);
+  log(`checkout ${logPrefix(workDirId)} created pid=${kiloPid} kilo_session_id=${bucket.kilo_session_id || "none"}`);
+
+  res.status(201).json({
+    work_dir_identifier: bucket.work_dir_identifier,
+    repo_name: bucket.repo_name,
+    branch: bucket.branch,
+    work_dir: bucket.work_dir,
+    kilo_session_id: bucket.kilo_session_id,
+    pid: bucket.pid,
+    session_state: bucket.session_state,
+    is_active_in_agent_dock: bucket.is_active_in_agent_dock,
+    last_warning: bucket.last_warning,
+  });
 });
 
-app.post("/api/kill/:sessionId", authGate, writeLimiter, async (req, res) => {
-  try {
-    const sessions = updateStatus(loadSessions());
-    for (const s of sessions) {
-      if (s.id !== req.params.sessionId) continue;
-      await terminateProcess(s.pid || 0);
-      s.status = "killed";
-      s.stopped_at = new Date().toISOString();
-      saveSessions(sessions);
-
-      const logFile = path.join(KILO_DIR, `session-${s.id}.log`);
-      try { fs.unlinkSync(logFile); log(`kill ${logPrefix(s.id)} removed log ${logFile}`); } catch (_) {}
-      if (s.work_dir && fs.existsSync(s.work_dir)) {
-        try { fs.rmSync(s.work_dir, { recursive: true, force: true }); log(`kill ${logPrefix(s.id)} removed work_dir ${s.work_dir}`); } catch (_) {}
-      }
-
-      return res.json({ status: "killed", session_id: req.params.sessionId });
-    }
-    res.status(404).json({ error: "session not found" });
-  } catch (e) {
-    log(`kill ${logPrefix(req.params.sessionId)} error: ${e.message}`);
-    res.status(500).json({ error: "failed to kill session" });
+// POST /api/repos/:workDirId/start — smart Start button.
+// If a kilo_session_id is present, attempts resume (--session --cloud-fork).
+// If resume reports importFailed (cloud session was deleted), the server
+// falls through transparently to fresh-spawn behavior: returns 409 with
+// `needs_new_session:true` so the UI can show the confirmation dialog; the
+// user's confirmation triggers a follow-up call to /new-session.
+// If no kilo_session_id, returns 409 needs_new_session right away.
+app.post("/api/repos/:workDirId/start", authGate, writeLimiter, async (req, res) => {
+  const repos = reposLib.updateStatus(reposLib.loadRepos());
+  const bucket = reposLib.findBucket(repos, req.params.workDirId);
+  if (!bucket) return res.status(404).json({ error: "repo bucket not found" });
+  if (bucket.session_state === "running") {
+    return res.status(409).json({ error: "already running", work_dir_identifier: bucket.work_dir_identifier });
   }
-});
-
-app.post("/api/sessions/:id/pause", authGate, writeLimiter, async (req, res) => {
-  try {
-    const sessions = updateStatus(loadSessions());
-    for (const s of sessions) {
-      if (s.id !== req.params.id) continue;
-      if (s.status !== "running") {
-        return res.status(409).json({ error: "session is not running" });
-      }
-      await terminateProcess(s.pid || 0);
-      s.status = "paused";
-      s.paused_at = new Date().toISOString();
-      s.pid = null;
-      saveSessions(sessions);
-      return res.json({ status: "paused", session_id: req.params.id });
-    }
-    res.status(404).json({ error: "session not found" });
-  } catch (e) {
-    log(`pause ${logPrefix(req.params.id)} error: ${e.message}`);
-    res.status(500).json({ error: "failed to pause session" });
-  }
-});
-
-app.post("/api/sessions/:id/continue", authGate, writeLimiter, (req, res) => {
-  const prompt = (req.body?.prompt || "").trim();
-  if (!prompt) {
-    return res.status(400).json({ error: "prompt required in body" });
+  if (!bucket.work_dir || !fs.existsSync(bucket.work_dir)) {
+    return res.status(409).json({ error: "work directory no longer exists — cannot start" });
   }
 
-  const sessions = loadSessions();
-  const session = sessions.find((s) => s.id === req.params.id);
-  if (!session) {
-    return res.status(404).json({ error: "session not found" });
-  }
-  if (!session.cloud_session_id) {
+  const pre = authPreflight();
+  if (pre) return res.status(409).json(pre);
+
+  // No cloud session on record → need a fresh spawn.
+  if (!bucket.kilo_session_id) {
     return res.status(409).json({
-      error: "no cloud_session_id captured — original kilo run may still be in progress, or did not complete cleanly",
+      needs_new_session: true,
+      reason: "no cloud session on record — start a new session in this work dir?",
+      work_dir_identifier: bucket.work_dir_identifier,
     });
   }
-  if (session.status === "running") {
-    return res.status(409).json({ error: "session is still running" });
+
+  let result;
+  try {
+    result = await kiloLib.resumeKiloSession(bucket.work_dir, bucket.work_dir_identifier, bucket.kilo_session_id);
+  } catch (e) {
+    return res.status(500).json({ error: `resume failed: ${e.message}` });
+  }
+
+  // Cloud session was actually deleted even though we believed it was alive.
+  // Surface needs_new_session so the UI asks for confirmation before we
+  // silently start a brand-new kilo session in the work dir.
+  if (result.importFailed) {
+    bucket.cloud_session_status = "deleted";
+    bucket.cloud_session_deleted = true;
+    reposLib.saveRepos(repos);
+    log(`start ${logPrefix(bucket.work_dir_identifier)} cloud session ${bucket.kilo_session_id} was deleted — needs_new_session`);
+    return res.status(409).json({
+      needs_new_session: true,
+      reason: "cloud session no longer exists — start a new session in this work dir?",
+      work_dir_identifier: bucket.work_dir_identifier,
+      cloud_session_deleted: true,
+    });
+  }
+
+  const { pid, cloudSessionId } = result;
+  bucket.session_state = "running";
+  bucket.pid = pid;
+  bucket.is_active_in_agent_dock = true;
+  if (cloudSessionId) bucket.kilo_session_id = cloudSessionId;
+  bucket.cloud_session_status = "active";
+  bucket.resumed_at = new Date().toISOString();
+  bucket.resume_count = (bucket.resume_count || 0) + 1;
+  bucket.last_warning = result.started === true ? null : (result.reason || "resume did not reach an interactive TUI");
+  reposLib.saveRepos(repos);
+
+  return res.status(result.started === true ? 202 : 200).json({
+    work_dir_identifier: bucket.work_dir_identifier,
+    kilo_session_id: bucket.kilo_session_id,
+    pid,
+    session_state: bucket.session_state,
+    resumed_live: result.started === true,
+    reason: result.reason || null,
+  });
+});
+
+// POST /api/repos/:workDirId/new-session — explicit fresh spawn (no
+// --session resume). Always creates a new kilo session in the existing work
+// dir. Called by the UI after the "needs new session" confirmation dialog.
+app.post("/api/repos/:workDirId/new-session", authGate, writeLimiter, async (req, res) => {
+  const repos = reposLib.updateStatus(reposLib.loadRepos());
+  const bucket = reposLib.findBucket(repos, req.params.workDirId);
+  if (!bucket) return res.status(404).json({ error: "repo bucket not found" });
+  if (bucket.session_state === "running") {
+    return res.status(409).json({ error: "already running", work_dir_identifier: bucket.work_dir_identifier });
+  }
+  if (!bucket.work_dir || !fs.existsSync(bucket.work_dir)) {
+    return res.status(409).json({ error: "work directory no longer exists — cannot start" });
+  }
+
+  const pre = authPreflight();
+  if (pre) return res.status(409).json(pre);
+
+  let result;
+  try {
+    result = await kiloLib.startKiloSession(bucket.work_dir, bucket.work_dir_identifier);
+  } catch (e) {
+    return res.status(500).json({ error: `session start failed: ${e.message}` });
+  }
+  const { pid: kiloPid, cloudSessionId } = result;
+
+  bucket.session_state = result.started === false ? "stopped" : "running";
+  if (result.started === false) {
+    bucket.stopped_at = new Date().toISOString();
+    bucket.last_warning = result.reason || "kilo did not reach an interactive prompt";
+  } else {
+    bucket.stopped_at = null;
+    bucket.last_warning = null;
+  }
+  bucket.pid = kiloPid;
+  bucket.kilo_session_id = cloudSessionId || bucket.kilo_session_id;
+  bucket.is_active_in_agent_dock = result.started !== false;
+  bucket.cloud_session_status = cloudSessionId ? "active" : "deleted";
+  bucket.cloud_session_deleted = false;
+  bucket.started_at = new Date().toISOString();
+  bucket.resumed_at = new Date().toISOString();
+  bucket.resume_count = (bucket.resume_count || 0) + 1;
+  reposLib.saveRepos(repos);
+
+  log(`new-session ${logPrefix(bucket.work_dir_identifier)} spawned pid=${kiloPid} kilo_session_id=${bucket.kilo_session_id || "none"} live=${result.started !== false}`);
+
+  res.status(result.started === false ? 200 : 202).json({
+    work_dir_identifier: bucket.work_dir_identifier,
+    kilo_session_id: bucket.kilo_session_id,
+    pid: kiloPid,
+    session_state: bucket.session_state,
+    is_active_in_agent_dock: bucket.is_active_in_agent_dock,
+    last_warning: bucket.last_warning,
+  });
+});
+
+// POST /api/repos/:workDirId/pause — kill PTY, keep cloud session alive.
+app.post("/api/repos/:workDirId/pause", authGate, writeLimiter, async (req, res) => {
+  const repos = reposLib.updateStatus(reposLib.loadRepos());
+  const bucket = reposLib.findBucket(repos, req.params.workDirId);
+  if (!bucket) return res.status(404).json({ error: "repo bucket not found" });
+  if (bucket.session_state !== "running") {
+    return res.status(409).json({ error: "bucket is not running" });
+  }
+  await reposLib.terminateProcess(bucket.pid || 0);
+  bucket.session_state = "paused";
+  bucket.paused_at = new Date().toISOString();
+  bucket.pid = null;
+  bucket.is_active_in_agent_dock = false;
+  reposLib.saveRepos(repos);
+  log(`pause ${logPrefix(bucket.work_dir_identifier)} — PTY killed, cloud_session_id ${bucket.kilo_session_id || "none"} preserved`);
+  return res.status(200).json({ session_state: "paused", work_dir_identifier: bucket.work_dir_identifier });
+});
+
+// POST /api/repos/:workDirId/continue — headless one-shot `kilo run` against
+// the bucket's cloud session id (no TUI). No UI button; for external callers.
+app.post("/api/repos/:workDirId/continue", authGate, writeLimiter, (req, res) => {
+  const prompt = (req.body?.prompt || "").trim();
+  if (!prompt) return res.status(400).json({ error: "prompt required in body" });
+
+  const repos = reposLib.loadRepos();
+  const bucket = reposLib.findBucket(repos, req.params.workDirId);
+  if (!bucket) return res.status(404).json({ error: "repo bucket not found" });
+  if (!bucket.kilo_session_id) {
+    return res.status(409).json({
+      error: "no kilo_session_id on this bucket — start a session first via /start or /new-session",
+    });
+  }
+  if (bucket.session_state === "running") {
+    return res.status(409).json({ error: "session is already running — pause or use the TUI instead" });
   }
 
   const args = [
-    "run",
-    prompt,
-    "--dir", session.work_dir,
-    "--session", session.cloud_session_id,
+    "run", prompt,
+    "--dir", bucket.work_dir,
+    "--session", bucket.kilo_session_id,
     "--cloud-fork",
     "--share",
     "--dangerously-skip-permissions",
@@ -385,121 +536,87 @@ app.post("/api/sessions/:id/continue", authGate, writeLimiter, (req, res) => {
     "--log-level", "INFO",
   ];
 
-  const label = req.params.id;
-  writeProjectConfig(session.work_dir, label);
-  const logFile = path.join(KILO_DIR, `session-${label}-cont-${Date.now()}.log`);
-  log(`_continue_session ${logPrefix(label)} cloud_id=${session.cloud_session_id} running: kilo ${args.join(" ")}`);
+  writeProjectConfig(bucket.work_dir, bucket.work_dir_identifier);
+  const logFile = path.join(KILO_DIR, `session-${bucket.work_dir_identifier}-cont-${Date.now()}.log`);
+  log(`_continue ${logPrefix(bucket.work_dir_identifier)} cloud_id=${bucket.kilo_session_id} running: kilo ${args.join(" ")}`);
   const logFd = fs.openSync(logFile, "a");
   const child = spawn("kilo", args, {
-    cwd: session.work_dir,
+    cwd: bucket.work_dir,
     env: { ...process.env, KILO_REMOTE: "1" },
     stdio: ["ignore", logFd, logFd],
     detached: true,
   });
   child.unref();
 
-  session.status = "running";
-  session.pid = child.pid;
-  session.started_at = new Date().toISOString();
-  session.last_continue_prompt = prompt.slice(0, 200);
-  session.last_continue_log = logFile;
-  saveSessions(sessions);
+  bucket.last_continue_prompt = prompt.slice(0, 200);
+  bucket.last_continue_log = logFile;
+  reposLib.saveRepos(repos);
 
   return res.status(202).json({
-    session_id: label,
-    cloud_session_id: session.cloud_session_id,
+    work_dir_identifier: bucket.work_dir_identifier,
+    kilo_session_id: bucket.kilo_session_id,
     pid: child.pid,
     log_file: logFile,
     prompt_excerpt: prompt.slice(0, 200),
   });
 });
 
-app.post("/api/sessions/:id/resume", authGate, writeLimiter, async (req, res) => {
-  const sessions = loadSessions();
-  const session = sessions.find((s) => s.id === req.params.id);
-  if (!session) {
-    return res.status(404).json({ error: "session not found" });
-  }
-  if (session.status === "running") {
-    return res.status(409).json({ error: "session is already running" });
-  }
-  if (session.status === "killed") {
-    return res.status(409).json({ error: "killed sessions cannot be resumed" });
-  }
-  if (!session.work_dir || !fs.existsSync(session.work_dir)) {
-    return res.status(409).json({
-      error: "work directory no longer exists — cannot resume",
-    });
-  }
+// POST /api/repos/:workDirId/kill — terminate PTY + delete cloud session,
+// PRESERVE work_dir + registry entry. Status transitions to "killed".
+app.post("/api/repos/:workDirId/kill", authGate, writeLimiter, async (req, res) => {
+  const repos = reposLib.updateStatus(reposLib.loadRepos());
+  const bucket = reposLib.findBucket(repos, req.params.workDirId);
+  if (!bucket) return res.status(404).json({ error: "repo bucket not found" });
 
-  const label = req.params.id;
-
-  let result;
-  try {
-    result = await resumeKiloSession(session.work_dir, label, session.cloud_session_id);
-  } catch (e) {
-    return res.status(500).json({ error: `resume failed: ${e.message}` });
+  await reposLib.terminateProcess(bucket.pid || 0);
+  if (bucket.kilo_session_id) {
+    const r = reposLib.deleteCloudSession(bucket.kilo_session_id);
+    log(`kill ${logPrefix(bucket.work_dir_identifier)} cloud delete ok=${r.ok} reason=${r.reason}`);
   }
-
-  // If the cloud session was deleted from the Dashboard, the resume detected
-  // the import failure early and tore down the PTY. Start a fresh session in
-  // the same work directory — file changes are preserved because the repo is
-  // already checked out.
-  if (result.importFailed) {
-    log(`resume ${logPrefix(label)} cloud session deleted — starting fresh session in ${session.work_dir}`);
-    let freshResult;
-    try {
-      freshResult = await startKiloSession(session.work_dir, label);
-    } catch (e) {
-      return res.status(500).json({ error: `failed to start fresh session: ${e.message}` });
-    }
-    session.status = "running";
-    session.pid = freshResult.pid;
-    session.cloud_session_id = freshResult.cloudSessionId || null;
-    session.started_at = new Date().toISOString();
-    session.resume_count = (session.resume_count || 0) + 1;
-    session.cloud_session_deleted = true;
-    saveSessions(sessions);
-
-    return res.status(202).json({
-      session_id: label,
-      cloud_session_id: session.cloud_session_id,
-      pid: freshResult.pid,
-      status: session.status,
-      resumed_live: freshResult.started !== false,
-      message: "Cloud session was deleted. A new session has been created. Your file changes are preserved.",
-      cloud_session_deleted: true,
-    });
-  }
-
-  const { pid, cloudSessionId } = result;
-
-  // `started` means the resumed TUI actually became interactive (prompt
-  // detected OR remote-ws connected). When it is false the process may still be
-  // alive but it is NOT controllable from the Cloud Dashboard. We keep the pid
-  // (so liveness polling + onExit still track it) but flag the non-interactive
-  // state so the failure surfaces instead of looking like a healthy session.
-  const resumedLive = result.started === true;
-  session.status = "running";
-  session.pid = pid;
-  session.cloud_session_id = cloudSessionId || session.cloud_session_id;
-  session.started_at = new Date().toISOString();
-  session.resume_count = (session.resume_count || 0) + 1;
-  if (!resumedLive) {
-    session.resume_warning = result.reason || "resume did not reach an interactive TUI";
-    log(`resume ${logPrefix(label)} WARNING — session NOT live/interactive (${session.resume_warning})`);
-  }
-  saveSessions(sessions);
-
-  return res.status(resumedLive ? 202 : 200).json({
-    session_id: label,
-    cloud_session_id: session.cloud_session_id,
-    pid,
-    status: session.status,
-    resumed_live: resumedLive,
-    reason: result.reason || null,
+  bucket.session_state = "killed";
+  bucket.killed_at = new Date().toISOString();
+  bucket.pid = null;
+  bucket.is_active_in_agent_dock = false;
+  reposLib.saveRepos(repos);
+  log(`kill ${logPrefix(bucket.work_dir_identifier)} — work dir preserved at ${bucket.work_dir}`);
+  return res.status(200).json({
+    session_state: "killed",
+    work_dir_identifier: bucket.work_dir_identifier,
+    work_dir_preserved: true,
   });
 });
+
+// DELETE /api/repos/:workDirId — kill + remove work dir + remove registry
+// entry. The bucket can be re-checked-out fresh afterwards.
+app.delete("/api/repos/:workDirId", authGate, writeLimiter, async (req, res) => {
+  const repos = reposLib.updateStatus(reposLib.loadRepos());
+  const bucket = reposLib.findBucket(repos, req.params.workDirId);
+  if (!bucket) return res.status(404).json({ error: "repo bucket not found" });
+
+  await reposLib.terminateProcess(bucket.pid || 0);
+  if (bucket.kilo_session_id) {
+    const r = reposLib.deleteCloudSession(bucket.kilo_session_id);
+    log(`delete ${logPrefix(bucket.work_dir_identifier)} cloud delete ok=${r.ok} reason=${r.reason}`);
+  }
+  if (bucket.work_dir && fs.existsSync(bucket.work_dir)) {
+    try { fs.rmSync(bucket.work_dir, { recursive: true, force: true }); } catch (e) {
+      log(`delete ${logPrefix(bucket.work_dir_identifier)} work dir rm failed: ${e.message}`);
+    }
+  }
+  // Also remove the per-session kilo PTY log file (orphan otherwise).
+  const logFile = path.join(KILO_DIR, `session-${bucket.work_dir_identifier}.log`);
+  try { fs.unlinkSync(logFile); log(`delete ${logPrefix(bucket.work_dir_identifier)} removed log ${logFile}`); } catch (_) {}
+
+  const remaining = repos.filter((r) => r.work_dir_identifier !== bucket.work_dir_identifier);
+  reposLib.saveRepos(remaining);
+  log(`delete ${logPrefix(bucket.work_dir_identifier)} — work dir + registry entry removed`);
+  return res.status(200).json({
+    deleted: true,
+    work_dir_identifier: bucket.work_dir_identifier,
+  });
+});
+
+// ── Auth endpoints (unchanged) ───────────────────────────────────────
 
 app.post("/api/auth/login", authLimiter, (req, res) => {
   if (DEVICE_AUTH.status === "pending") {
@@ -551,7 +668,11 @@ app.post("/api/auth/cancel", authLimiter, (_req, res) => {
   res.json({ status: "cancelled" });
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  log(`Server running on http://0.0.0.0:${PORT}`);
-  initKiloStartup();
-});
+module.exports = app;
+
+if (require.main === module) {
+  app.listen(PORT, "0.0.0.0", () => {
+    log(`Server running on http://0.0.0.0:${PORT}`);
+    initKiloStartup();
+  });
+}

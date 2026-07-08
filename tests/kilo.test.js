@@ -12,7 +12,7 @@ function reloadKilo(envOverrides = {}) {
   delete require.cache[require.resolve(kiloPath)];
   delete require.cache[require.resolve(path.resolve(__dirname, "../lib/logger.js"))];
   delete require.cache[require.resolve(path.resolve(__dirname, "../lib/auth.js"))];
-  delete require.cache[require.resolve(path.resolve(__dirname, "../lib/sessions.js"))];
+  delete require.cache[require.resolve(path.resolve(__dirname, "../lib/repos.js"))];
   return require(kiloPath);
 }
 
@@ -272,9 +272,9 @@ describe("kilo", () => {
 
       // Mock fetch for checkGateway
       global.fetch = mock.fn(() => Promise.resolve({ status: 200 }));
-      // Mock loadSessions
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => []);
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
+      // Mock loadRepos / saveRepos
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => []);
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "saveRepos", () => {});
 
       await kilo.initKiloStartup();
 
@@ -298,17 +298,17 @@ describe("kilo", () => {
       mock.method(fs, "existsSync", () => true);
 
       global.fetch = mock.fn(() => Promise.resolve({ status: 200 }));
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "killed-1", status: "killed", work_dir: "/tmp/deleteme" },
-        { id: "running-1", status: "running", pid: 999999 },
-        { id: "paused-1", status: "paused" },
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => [
+        { work_dir_identifier: "killed-1", status: "killed", work_dir: "/tmp/deleteme" },
+        { work_dir_identifier: "running-1", status: "running", pid: 999999 },
+        { work_dir_identifier: "paused-1", status: "paused" },
       ]);
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "saveRepos", () => {});
 
       await kilo.initKiloStartup();
 
       const logs = console.log.mock.calls.map(c => c.arguments.join(" "));
-      const hasRecovery = logs.some(l => l.includes("removed killed") || l.includes("paused") || l.includes("startup complete"));
+      const hasRecovery = logs.some(l => l.includes("paused") || l.includes("startup complete"));
       assert.ok(hasRecovery, "should have recovery or startup messages");
 
       delete global.fetch;

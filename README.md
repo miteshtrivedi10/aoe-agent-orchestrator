@@ -2,6 +2,8 @@
 
 Agent Dock is a self-hosted web UI and REST API that manages [Kilo CLI](https://kilo.ai) coding sessions. Give it a Git repository URL and optionally a branch (defaults to `main`) — it clones the repo, spins up an interactive Kilo session in a PTY, and connects it to the Kilo Cloud Dashboard via WebSocket relay. From there you can send prompts, pause/resume work, kill sessions, and view logs, all from the browser.
 
+Agent Dock uses a **one-bucket-per-repo** model: each unique repo URL (matched by its basename, e.g. `myrepo`) gets exactly one bucket in the local registry. The bucket holds the cloned work directory, the kilo cloud-session id, the PTY pid, and the last-known state. Checking out the same repo URL again reuses the existing bucket — you don't get duplicate work trees. Branch is **a snapshot from checkout, not a constraint**: it is read best-effort from `git rev-parse` on each poll and can be switched inside the TUI without invalidating the bucket.
+
 The key value: sessions started through Agent Dock are not locked to the server. Once a session is live, it is available on the **Kilo Cloud Dashboard** (web) and the **Kilo mobile app**. You can start work on your machine, continue it from your phone on the train, and review the diff from the dashboard — no reconnection, no context loss. Agent Dock acts as the orchestration layer that creates and manages these sessions, while Kilo's own infrastructure handles the real-time sync across devices.
 
 Agent Dock is provider-agnostic at the config level. It ships with Kilo as the default backend but supports OpenRouter, OpenCode, Gemini, and custom providers. MCP servers (Context7, GitHub, etc.) can be added by dropping a config block into `kilo.jsonc`. Rules, model preferences, and tool permissions are all configurable without code changes.
@@ -23,11 +25,11 @@ docker run -p 7860:7860 \
   agent-dock
 ```
 
-Open `http://localhost:7860` in your browser. Enter a repo URL (branch defaults to `main`), click **Spin Up Agent**.
+Open `http://localhost:7860` in your browser. Enter a repo URL (must end in `.git`), optionally a branch (defaults to `main`), click **Checkout & Start**.
 
 ## Secrets
 
-All configuration is passed via environment variables. You can pass each key individually with `-e`, or bundle them into a single `AGENT_DOCK_SECRETS` JSON blob.
+All configuration is passed via environment variables. You can pass each key individually with `-e`, or (when deployed on Hugging Face Spaces) bundle them into a single `HF_SECRETS` JSON blob parsed at boot.
 
 | Secret | Required | Description |
 |---|---|---|
@@ -53,13 +55,15 @@ docker run -p 7860:7860 \
   agent-dock
 ```
 
-### Example: single JSON blob
+### Example: single JSON blob (Hugging Face Spaces)
 
 ```bash
 docker run -p 7860:7860 \
-  -e AGENT_DOCK_SECRETS='{"KILO_API_KEY":"...","GITHUB_TOKEN":"ghp_...","CONTEXT7_API_KEY":"ctx7sk-..."}' \
+  -e HF_SECRETS='{"KILO_API_KEY":"...","GITHUB_TOKEN":"ghp_...","CONTEXT7_API_KEY":"ctx7sk-..."}' \
   agent-dock
 ```
+
+`HF_SECRETS` is parsed by `entrypoint.sh` at boot — each JSON key is exported as its own environment variable before the Node server starts, so `kilo.jsonc`'s `${env:VAR}` placeholder resolution works the same way as individual `-e` flags.
 
 ## Where to host
 
@@ -71,13 +75,15 @@ Expose port `7860` and pass your secrets as environment variables. For productio
 
 | Feature | Status |
 |---|---|
-| Kilo CLI session management (spin up, pause, resume, kill) | done |
+| One-bucket-per-repo session management (checkout, start, pause, kill, delete) | done |
+| Smart resume — server resumes cloud session or returns `needs_new_session` for gone sessions | done |
+| Cloud liveness refresh (`unknown` / `active` / `deleted`) after Start/Resume | done |
+| Row-level lock + status line UX — buttons disable mid-action, "Working: …" label, poll confirms new state before unlock | done |
 | Kilo Cloud Dashboard relay (WebSocket) | done |
 | Kilo mobile app access to active sessions | done |
-| Browser-based management UI | done |
+| Browser-based management UI (Repo List, Diagnostics, Logs, Auth tabs) | done |
 | REST API with bearer-token auth | done |
 | Per-IP rate limiting | done |
-| Automatic session recovery on restart | done |
 | Private repo cloning via `GITHUB_TOKEN` | done |
 | Device-auth login flow (no manual token paste) | done |
 | PTY log viewer with ANSI stripping | done |
@@ -88,6 +94,53 @@ Expose port `7860` and pass your secrets as environment variables. For productio
 **Providers:** Kilo (default), OpenRouter, OpenCode, Gemini, Jina embeddings.
 
 **MCP servers:** Context7 (live library docs), GitHub (PRs/issues, code search).
+
+## REST API
+
+All endpoints under `/api/*` require `Authorization: Bearer <AGENT_DOCK_API_TOKEN>` except `/api/status`. Write endpoints (POST/DELETE) are rate-limited per IP.
+
+### Bucket lifecycle
+
+| Method | Path | Notes |
+|---|---|---|
+| `POST` | `/api/repos/checkout` | Body: `{ repo_url, branch? }`. Clones the repo, starts a kilo session, registers a new bucket. Returns `201` with the new bucket, or `409` if a bucket for the same repo already exists (`error: "already checked out"`), a different repo URL collides on the same basename (`error: "bucket collision"`), or auth is invalid (`{ auth_invalid: true }`). |
+| `GET`  | `/api/repos` | Returns the bucket registry as a JSON array. Each entry includes `work_dir_identifier`, `repo_url`, `repo_name`, `branch`, `cloud_session_status`, `session_state` (`running` / `paused` / `stopped` / `killed`), `started_at`. |
+| `GET`  | `/api/repos/:workDirId` | Single-bucket detail. Returns `404` if not found. |
+| `POST` | `/api/repos/:workDirId/start` | Smart resume. If the cloud session is alive, resumes the existing PTY (`resumed_live: true`). If the cloud session is gone, returns `409 { needs_new_session: true, reason }` and the UI opens a confirmation dialog. Other `409`s: `auth_invalid`, `already running`. |
+| `POST` | `/api/repos/:workDirId/new-session` | Starts a fresh kilo cloud session in the existing work directory. Used after `start` returns `needs_new_session: true`. File changes are preserved. |
+| `POST` | `/api/repos/:workDirId/pause` | Terminates the PTY but preserves `kilo_session_id`. Does not touch the cloud. Bucket transitions `running → paused`. |
+| `POST` | `/api/repos/:workDirId/kill` | Terminates the PTY, calls `kilo session delete <id>` (best-effort), marks the bucket as `killed`. Preserves the work directory. |
+| `DELETE` | `/api/repos/:workDirId` | Kill + `rm -rf` the work directory + removes the registry entry. The repo can be re-checked out fresh afterwards. |
+| `POST` | `/api/repos/:workDirId/continue` | Sends a prompt to the live PTY. Requires the bucket to be `running` with a known `kilo_session_id`. |
+
+### Other
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/` | The HTML UI (served without auth so the browser can render the shell). |
+| `GET` | `/health` | Plain `200 ok` — useful for container health checks. |
+| `GET` | `/api/status` | Boot diagnostics: `kilo_version`, `kilo_which`, `repo_count`, `default_model`, rate-limit status. No auth required. |
+| `GET` | `/api/logs` | In-memory ring-buffer tail (latest N lines). |
+| `GET` | `/api/logs/kilo-internal` | kilo's own log files (under `/data/kilo/log/*.log`). |
+| `GET` | `/api/relay-check` | Verifies the per-PTY cloud-relay chain — `auth.json`, `api.kilo.ai`, `ingest.kilosessions.ai`, `kilo.json` config — is healthy. |
+| `GET` | `/api/diagnostics` | Server-side diagnostic dump (kilo bin path, version, auth validity). |
+| `POST` | `/api/auth/login` | Starts the device-auth flow. Returns `{ status: "pending", url, code }` — the URL and code the user must open in a browser. |
+| `GET` | `/api/auth/status` | Polls device-auth progress. Returns `{ status: "idle" | "pending" | "success" | "failed" | "cancelled" }`. |
+| `POST` | `/api/auth/cancel` | Cancels an in-flight device-auth flow. |
+
+### State machine
+
+```
+running  ──pause──▶  paused
+running  ──kill───▶  killed
+running  ──PTY dies─▶  stopped   (via updateStatus() on next poll)
+paused   ──start──▶  running    (smart resume)
+stopped  ──start──▶  running    (smart resume)
+killed   ──start──▶  running    (fresh /new-session — no cloud session on record)
+any      ──delete─▶  (registry entry + work dir removed)
+```
+
+`cloud_session_status` is `unknown` by default and is only refreshed after Start/Resume attempts (`active` when the cloud session is reachable, `deleted` after a Resume reports `importFailed`).
 
 ## Configuring MCP servers, providers, rules, and tools
 
@@ -136,7 +189,7 @@ rules/
   security.md       # forbidden operations
 ```
 
-Rules are copied into each session's `.kilo/rules/` directory at spin-up. The agent reads them as system-level instructions.
+Rules are copied into each session's `.kilo/rules/` directory at checkout. The agent reads them as system-level instructions.
 
 ### Adding tools or extensions
 
@@ -165,12 +218,13 @@ flowchart TB
 
     subgraph Docker["Docker Container - Port 7860"]
         server["Express Server\nREST API + Static UI"]
+        registry["repos.json\none bucket per repo"]
 
-        subgraph Sessions["Session Manager"]
+        subgraph Buckets["Bucket PTYs"]
             direction LR
-            pty1["PTY Session 1\nkilo + KILO_REMOTE=1"]
-            pty2["PTY Session 2"]
-            ptyN["PTY Session N"]
+            pty1["Bucket 1\nrepo: foo, branch: main\nkilo + KILO_REMOTE=1"]
+            pty2["Bucket 2\nrepo: bar, branch: dev"]
+            ptyN["Bucket N"]
         end
 
         config["kilo.jsonc\nproviders, mcpServers, rules"]
@@ -186,9 +240,10 @@ flowchart TB
         providers["Model Providers\nKilo, OpenRouter, Gemini"]
     end
 
-    browser -->|"REST API\nspin up, pause, resume, kill"| server
+    browser -->|"REST API\ncheckout, start, pause, kill, delete"| server
     browser -->|"GET /"| server
-    server -->|"spawn / signal PTY"| Sessions
+    server -->|"read / write"| registry
+    server -->|"spawn / signal PTY"| Buckets
     server -->|"read"| logs
 
     pty1 -->|"git clone"| git
@@ -208,9 +263,8 @@ No separate `kilo daemon` or `kilo remote` processes. Each PTY session with `KIL
 
 ### Request flow
 
-1. User clicks **Spin Up Agent** in the browser.
-2. Express server clones the repo, copies `rules/` into the work directory, spawns `kilo` in a PTY with `KILO_REMOTE=1`.
-3. Kilo connects to `ingest.kilosessions.ai` via WebSocket — the session is now live on the Cloud Dashboard and mobile app.
-4. The initial prompt is sent. Kilo calls the configured model provider (Kilo backend, OpenRouter, etc.) and MCP servers as needed.
-5. User can pause (SIGTERM), resume (re-fork with `--cloud-fork`), or kill the session from any interface.
-6. Logs are streamed to the ring buffer and viewable in the Agent Dock UI.
+1. User clicks **Checkout & Start** in the browser. The Express server validates the URL, computes the bucket identifier (repo basename), checks the registry for an existing bucket, and — if none — clones the repo, copies `rules/` into the work directory, spawns `kilo` in a PTY with `KILO_REMOTE=1`, and registers a new bucket.
+2. Kilo connects to `ingest.kilosessions.ai` via WebSocket — the session is now live on the Cloud Dashboard and mobile app.
+3. The initial prompt is sent. Kilo calls the configured model provider (Kilo backend, OpenRouter, etc.) and MCP servers as needed.
+4. User can pause (terminates PTY, preserves cloud session id), start (smart-resumes the cloud session, or prompts for a fresh one if it's gone), or kill (terminates PTY + `kilo session delete`, preserves work dir) from the Repo List. The row-level busy lock keeps the buttons disabled and shows a "Working: …" label until the next poll confirms the new state.
+5. Logs are streamed to the ring buffer and viewable in the Agent Dock UI's Logs tab.

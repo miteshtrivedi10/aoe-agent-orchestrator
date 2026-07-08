@@ -493,6 +493,42 @@ tr:last-child td { border-bottom: none; }
   font-size: 0.95rem;
 }
 
+/* Row-level in-flight state — applied to the <tr> while any of its
+ * action buttons is awaiting a server response. Buttons are disabled,
+ * the Actions cell shows "Working: pause… spinner", and the row
+ * background is dimmed so the user sees the row is mid-transition.
+ * Cleared when the fetch resolves AND the next poll reflects the new
+ * state (or immediately on error / network failure).
+ */
+tr.row-busy td { opacity: 0.85; }
+tr.row-busy .btn { pointer-events: none; }
+
+/* On error we briefly flash the row red so the user knows the last
+ * click failed server-side (not just slow). Cleared after 1.2s. */
+tr.row-error {
+  animation: rowErrFlash 1.2s ease-out 1;
+}
+@keyframes rowErrFlash {
+  0%   { background: rgba(239, 68, 68, 0.18); }
+  100% { background: transparent; }
+}
+
+/* The Actions cell's "Working…" status line — replaces the buttons
+ * while a row is busy. Keeps cell height stable so the row doesn't
+ * jump. */
+.row-working {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+}
+.row-working .spinner-sm { margin: 0; }
+
 /* Mobile */
 @media (max-width: 900px) {
   .sidebar {
@@ -542,8 +578,8 @@ tr:last-child td { border-bottom: none; }
     <button type="button" class="nav-item active" data-target="new-session" onclick="navigateTo('new-session')">
       <span class="nav-icon">+</span> New Session
     </button>
-    <button type="button" class="nav-item" data-target="sessions" onclick="navigateTo('sessions')">
-      <span class="nav-icon">◎</span> Sessions
+    <button type="button" class="nav-item" data-target="repos" onclick="navigateTo('repos')">
+      <span class="nav-icon">◎</span> Repos
     </button>
     <button type="button" class="nav-item" data-target="diagnostics" onclick="navigateTo('diagnostics')">
       <span class="nav-icon">◈</span> Diagnostics
@@ -591,23 +627,35 @@ tr:last-child td { border-bottom: none; }
             <label for="branch">Branch</label>
             <input type="text" id="branch" placeholder="main" autocomplete="off">
           </div>
-          <button type="button" class="btn btn-primary" id="spinBtn" onclick="spinUp()">Spin Up Agent</button>
+          <button type="button" class="btn btn-primary" id="spinBtn" onclick="checkoutAndStart()">Checkout & Start</button>
         </div>
-        <p class="helper-text">The repo URL must end in <code>.git</code>.</p>
+        <p class="helper-text">The repo URL must end in <code>.git</code>. One bucket per repo — checking out the same repo again reuses the existing bucket and session.</p>
       </div>
     </section>
 
-    <section class="section" id="sessions">
+    <section class="section" id="repos">
       <div class="section-header">
-        <h2>Workspace Sessions</h2>
-        <p>Active and recently stopped Kilo sessions.</p>
+        <h2>Repo Buckets</h2>
+        <p>One bucket per repo. Branch is a snapshot from checkout — you can switch branches inside the TUI.</p>
       </div>
-      <div class="card" id="sessionsCard">
-        <div id="sessionsList">
-          <div class="empty">No active sessions. Spin one up above.</div>
+      <div class="card" id="reposCard">
+        <div id="reposList">
+          <div class="empty">No repos checked out. Spin one up above.</div>
         </div>
       </div>
     </section>
+
+    <!-- Hidden confirmation dialog for the "needs new session" flow -->
+    <div id="newSessionDialog" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:50;align-items:center;justify-content:center">
+      <div class="card" style="max-width:520px;width:90%;background:var(--bg-elevated,var(--bg))">
+        <h3 style="margin-top:0">Cloud session no longer exists</h3>
+        <p id="newSessionDialogBody" style="color:var(--text-secondary);font-size:0.9rem">The kilo cloud session for this bucket is not active. Start a new session in the same work directory? Your file changes are preserved.</p>
+        <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1.25rem">
+          <button type="button" class="btn" id="newSessionDialogCancel" onclick="cancelNewSessionDialog()">Cancel</button>
+          <button type="button" class="btn btn-primary" id="newSessionDialogConfirm">Start new session</button>
+        </div>
+      </div>
+    </div>
 
     <section class="section" id="diagnostics">
       <div class="section-header">
@@ -711,7 +759,7 @@ function navigateTo(targetId, pushState) {
 
 function handleHash() {
   const hash = window.location.hash.replace('#', '') || 'new-session';
-  const valid = ['new-session', 'sessions', 'diagnostics', 'logs', 'auth'];
+  const valid = ['new-session', 'repos', 'diagnostics', 'logs', 'auth'];
   navigateTo(valid.indexOf(hash) !== -1 ? hash : 'new-session', false);
 }
 
@@ -750,7 +798,41 @@ function authHeaders(extra) {
 const repoUrlInput = document.getElementById('repoUrl');
 const branchInput = document.getElementById('branch');
 const spinBtn = document.getElementById('spinBtn');
-const sessionsList = document.getElementById('sessionsList');
+const reposList = document.getElementById('reposList');
+
+// Pending "needs new session" confirmation — holds the work_dir_identifier
+// the user is being asked to confirm so the dialog's Confirm button knows
+// which bucket to spawn fresh.
+let pendingNewSessionId = null;
+
+// Per-row in-flight state — the heart of the disable-on-click UX.
+//
+// busyRows:  Map<workDirId, { action, since }>
+//   Tracks which rows have an action awaiting a server response (or
+//   awaiting poll-confirmation of the new state). While a row is
+//   busy, its buttons are disabled (pointer-events:none + opacity
+//   via the .row-busy class) so the user cannot queue a second
+//   action on the same row. Cleared only after the next /api/repos
+//   poll reflects the new state — preventing the user from clicking
+//   a stale button during the brief window between fetch-resolve and
+//   poll-refresh.
+//
+// rowWorkingLabel:  Map<workDirId, string>
+//   The text shown in the Actions cell while the row is busy,
+//   e.g. "Working: pause…". Kept separate from busyRows so the
+//   in-flight label can change without re-locking (e.g. from
+//   "Working: start…" to "Confirming…" after fetch resolves).
+const busyRows = new Map();
+const rowWorkingLabel = new Map();
+
+// Expected post-action state — set just before the fetch fires so
+// the next poll can decide whether to clear the busy lock. e.g.
+// after pauseRepo succeeds, expectedNextState.set(workDirId, 'paused');
+// the poll loop checks r.session_state, and if it matches the
+// expected value we clear the lock. If it doesn't match within
+// ~6 polls (~18s) the lock is force-cleared as a safety valve.
+const expectedNextState = new Map();
+const expectedStateSeenAt = new Map(); // workDirId → poll count when first set
 
 function toast(msg, type) {
   const t = document.getElementById('toast');
@@ -758,36 +840,90 @@ function toast(msg, type) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-function manageSessionActionButton(sessionId, action, state = 'idle') {
-    const buttonId = `${action}-${sessionId}`;
-    const btn = document.getElementById(buttonId);
-    if (!btn) return;
+// ── Row-busy helpers ────────────────────────────────────────────────
+// setRowBusy(workDirId, action): mark a row as mid-action. Disables
+//   all buttons in the row by adding the .row-busy class on the <tr>
+//   and replacing the Actions cell content with a "Working:
+//   <action>…" label + spinner. The previous buttons are preserved
+//   in a data attribute so clearRowBusy can restore them after the
+//   poll confirms the new state.
+//
+// clearRowBusy(workDirId, flashError?): un-mark the row. If flashError
+//   is true, briefly add the .row-error class so the user sees a red
+//   flash indicating the last action failed. (loadRepos will paint
+//   the next state on its next cycle.)
 
-    const spinnerHtml = '<span class="spinner spinner-sm"></span>';
-    let originalText = '';
-
-    if (action === 'pause') originalText = 'Pause';
-    else if (action === 'resume') originalText = 'Resume';
-    else if (action === 'kill') originalText = 'Kill';
-
-    if (state === 'loading') {
-        btn.disabled = true;
-        btn.innerHTML = spinnerHtml + (' ' + originalText);
-        btn.style.cursor = 'not-allowed';
-        // Preserve original color for disabled state look
-        if (btn.classList.contains('btn-warning')) btn.style.backgroundColor = '#d97706';
-        if (btn.classList.contains('btn-primary')) btn.style.backgroundColor = '#4f46e5';
-        if (btn.classList.contains('btn-danger')) btn.style.backgroundColor = '#dc2626';
-    } else if (state === 'idle' || state === 'error') {
-        btn.disabled = false;
-        btn.textContent = originalText;
-        btn.style.cursor = 'pointer';
-        // Revert styles - this might need more sophisticated CSS management
-        btn.style.backgroundColor = '';
-    }
+function actionVerb(action) {
+  if (action === 'pause')   return 'Pausing';
+  if (action === 'resume')  return 'Resuming';
+  if (action === 'kill')    return 'Killing';
+  if (action === 'start')   return 'Starting';
+  if (action === 'delete')  return 'Deleting';
+  return 'Working';
 }
 
-async function spinUp() {
+function setRowBusy(workDirId, action) {
+  busyRows.set(workDirId, { action: action, since: Date.now() });
+  rowWorkingLabel.set(workDirId, actionVerb(action) + '…');
+  // Apply immediately to the live DOM (the next loadRepos will also
+  // re-render with the lock preserved).
+  applyRowBusyInPlace(workDirId);
+}
+
+function applyRowBusyInPlace(workDirId) {
+  const row = document.querySelector('tr[data-repo-id="' + cssEscape(workDirId) + '"]');
+  if (!row) return;
+  row.classList.add('row-busy');
+  const actionsCell = row.querySelector('td[data-label="Actions"]');
+  if (!actionsCell) return;
+  // Save the original buttons HTML so clearRowBusy can restore them
+  // without waiting for the next poll (which might be slow).
+  if (!actionsCell.getAttribute('data-orig-actions')) {
+    actionsCell.setAttribute('data-orig-actions', actionsCell.innerHTML);
+  }
+  const label = rowWorkingLabel.get(workDirId) || 'Working…';
+  actionsCell.innerHTML =
+    '<span class="row-working"><span class="spinner spinner-sm"></span>' + esc(label) + '</span>';
+}
+
+function clearRowBusy(workDirId, flashError) {
+  busyRows.delete(workDirId);
+  rowWorkingLabel.delete(workDirId);
+  expectedNextState.delete(workDirId);
+  expectedStateSeenAt.delete(workDirId);
+  const row = document.querySelector('tr[data-repo-id="' + cssEscape(workDirId) + '"]');
+  if (!row) return;
+  row.classList.remove('row-busy');
+  const actionsCell = row.querySelector('td[data-label="Actions"]');
+  if (actionsCell && actionsCell.getAttribute('data-orig-actions')) {
+    actionsCell.innerHTML = actionsCell.getAttribute('data-orig-actions');
+    actionsCell.removeAttribute('data-orig-actions');
+  }
+  if (flashError) {
+    row.classList.remove('row-error'); // restart animation if mid-flash
+    void row.offsetWidth; // force reflow
+    row.classList.add('row-error');
+    setTimeout(() => row.classList.remove('row-error'), 1300);
+  }
+}
+
+function setRowWorkingLabel(workDirId, label) {
+  rowWorkingLabel.set(workDirId, label);
+  if (busyRows.has(workDirId)) applyRowBusyInPlace(workDirId);
+}
+
+// setExpectedState(workDirId, state): call in the success path of an
+// action handler to record the state the next poll should show before
+// the row-busy lock is cleared. Has a safety valve: if the poll has
+// not seen the expected state after 6 cycles (~18s at 3s poll), the
+// lock is force-cleared so the user is never permanently stuck.
+function setExpectedState(workDirId, state) {
+  expectedNextState.set(workDirId, state);
+  expectedStateSeenAt.set(workDirId, 0);
+  setRowWorkingLabel(workDirId, 'Confirming…');
+}
+
+async function checkoutAndStart() {
   const url = repoUrlInput.value.trim();
   if (!url) { toast('Enter a repo URL', 'error'); return; }
   if (!/\.git(?:\/?|#.*)?$/i.test(url)) {
@@ -796,76 +932,241 @@ async function spinUp() {
   const branch = branchInput.value.trim() || 'main';
 
   spinBtn.disabled = true;
-  spinBtn.innerHTML = '<span class="spinner"></span>Spinning...'; // Use spinner HTML
+  spinBtn.innerHTML = '<span class="spinner"></span>Checking out...';
 
   try {
-    const res = await fetch('/api/spin-up', {
+    const res = await fetch('/api/repos/checkout', {
       method: 'POST', headers: authHeaders({'Content-Type': 'application/json'}),
       body: JSON.stringify({ repo_url: url, branch: branch }),
     });
     const data = await res.json();
-    if (!res.ok) { toast(data.error || 'Failed to spin up session', 'error'); }
-    else { toast('Session started for ' + data.repo_name, 'success'); repoUrlInput.value = ''; branchInput.value = ''; }
+    if (!res.ok) {
+      if (res.status === 409 && data.work_dir_identifier && data.error === 'already checked out') {
+        toast('Already checked out — switch to Repos', 'info');
+        navigateTo('repos');
+        highlightRepoRow(data.work_dir_identifier);
+      } else if (res.status === 409 && data.auth_invalid) {
+        toast(data.error || 'Auth invalid — open the Auth tab first', 'error');
+      } else if (res.status === 409 && data.work_dir_identifier) {
+        toast(data.error || 'Bucket collision — different repo URL', 'error');
+      } else {
+        toast(data.error || 'Failed to checkout repo', 'error');
+      }
+    } else {
+      toast('Session started for ' + data.repo_name, 'success');
+      repoUrlInput.value = ''; branchInput.value = '';
+      navigateTo('repos');
+      highlightRepoRow(data.work_dir_identifier);
+    }
   } catch(e) { toast('Network error: ' + e.message, 'error'); }
   finally {
     spinBtn.disabled = false;
-    spinBtn.textContent = 'Spin Up Agent';
+    spinBtn.textContent = 'Checkout & Start';
   }
-  // loadSessions() will be called by polling, ensuring an up-to-date view
 }
 
-async function killSession(id) {
-  manageSessionActionButton(id, 'kill', 'loading');
-  try {
-    const res = await fetch('/api/kill/' + id, { method: 'POST', headers: authHeaders() });
-    const data = await res.json();
-    if (res.ok) {
-      toast('Session killed', 'success');
-    } else {
-      toast(data.error || 'Failed to kill session', 'error');
-      manageSessionActionButton(id, 'kill', 'error');
-    }
-  } catch(e) {
-    toast('Network error: ' + e.message, 'error');
-    manageSessionActionButton(id, 'kill', 'error');
+function highlightRepoRow(workDirId) {
+  // Best-effort visual scroll/highlight. The 3s poll will have rendered the
+  // row by the time this fires in the happy path; if not, the next poll
+  // picks it up. We try a couple of times.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    setTimeout(() => {
+      const row = document.querySelector('[data-repo-id="' + cssEscape(workDirId) + '"]');
+      if (row) {
+        row.scrollIntoView({behavior: 'smooth', block: 'center'});
+        row.style.transition = 'background 0.3s';
+        row.style.background = 'var(--accent-soft, rgba(80,120,200,0.18))';
+        setTimeout(() => { row.style.background = ''; }, 1500);
+      }
+    }, attempt * 600);
   }
-  // loadSessions() will refresh the state, and buttons will be re-rendered accordingly
 }
 
-async function pauseSession(id) {
-  manageSessionActionButton(id, 'pause', 'loading');
+// CSS.escape shim — keeps us robust on older engines (the container ships
+// Node 20 but the page runs in the operator's browser, which could be old).
+function cssEscape(s) {
+  if (window.CSS && typeof CSS.escape === 'function') return CSS.escape(s);
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+}
+
+// ── Repo bucket actions ──────────────────────────────────────────────
+// All actions address buckets by work_dir_identifier, not the legacy
+// random session id. Each state has specific button enablement (see table
+// in spec §6.3): running → Pause, Kill, Delete; paused/stopped → Start,
+// Kill, Delete; killed → Start (fresh), Delete.
+
+async function pauseRepo(workDirId) {
+  // Reject re-clicks while a row action is already in-flight (per-row lock).
+  if (busyRows.has(workDirId)) return;
+  setRowBusy(workDirId, 'pause');
   try {
-    const res = await fetch('/api/sessions/' + id + '/pause', { method: 'POST', headers: authHeaders() });
+    const res = await fetch('/api/repos/' + encodeURIComponent(workDirId) + '/pause', { method: 'POST', headers: authHeaders() });
     const data = await res.json();
     if (res.ok) {
       toast('Session paused', 'success');
+      // Hold the busy lock until the next poll confirms the new state.
+      setExpectedState(workDirId, 'paused');
     } else {
-      toast(data.error || 'Failed to pause session', 'error');
-      manageSessionActionButton(id, 'pause', 'error');
+      toast(data.error || 'Failed to pause', 'error');
+      clearRowBusy(workDirId, true);
     }
   } catch(e) {
     toast('Network error: ' + e.message, 'error');
-    manageSessionActionButton(id, 'pause', 'error');
+    clearRowBusy(workDirId, true);
   }
-  // loadSessions() will refresh the state
 }
 
-async function resumeSession(id) {
-  manageSessionActionButton(id, 'resume', 'loading');
+async function killRepo(workDirId) {
+  if (busyRows.has(workDirId)) return;
+  if (!confirm('Kill this bucket\'s session? Work dir and history preserved; cloud session is deleted. This bucket row stays as Killed.')) return;
+  setRowBusy(workDirId, 'kill');
   try {
-    const res = await fetch('/api/sessions/' + id + '/resume', { method: 'POST', headers: authHeaders() });
+    const res = await fetch('/api/repos/' + encodeURIComponent(workDirId) + '/kill', { method: 'POST', headers: authHeaders() });
     const data = await res.json();
     if (res.ok) {
-      toast('Session resumed', 'success');
+      toast('Session killed', 'success');
+      setExpectedState(workDirId, 'killed');
     } else {
-      toast(data.error || 'Failed to resume session', 'error');
-      manageSessionActionButton(id, 'resume', 'error');
+      toast(data.error || 'Failed to kill', 'error');
+      clearRowBusy(workDirId, true);
     }
   } catch(e) {
     toast('Network error: ' + e.message, 'error');
-    manageSessionActionButton(id, 'resume', 'error');
+    clearRowBusy(workDirId, true);
   }
-  // loadSessions() will refresh the state
+}
+
+async function deleteRepo(workDirId) {
+  if (busyRows.has(workDirId)) return;
+  if (!confirm('DELETE this bucket? This stops the session, removes the work directory from disk, and removes the entry from the registry. The repo can be re-checked out fresh afterwards. UNCOMMITTED FILE CHANGES WILL BE LOST.')) return;
+  setRowBusy(workDirId, 'delete');
+  try {
+    const res = await fetch('/api/repos/' + encodeURIComponent(workDirId), { method: 'DELETE', headers: authHeaders() });
+    const data = await res.json();
+    if (res.ok) {
+      toast('Bucket deleted', 'success');
+      // No expected state — the row will simply disappear from the next
+      // poll. Keep the lock so the user can't click it again before the
+      // row is gone, but clear after a short delay as a safety valve.
+      setRowWorkingLabel(workDirId, 'Removed…');
+      setTimeout(() => clearRowBusy(workDirId, false), 1500);
+    } else {
+      toast(data.error || 'Failed to delete', 'error');
+      clearRowBusy(workDirId, true);
+    }
+  } catch(e) {
+    toast('Network error: ' + e.message, 'error');
+    clearRowBusy(workDirId, true);
+  }
+}
+
+// Start button — smart resume. Server either resumes the cloud session or
+// returns 409 needs_new_session:true (which opens the confirmation dialog).
+async function startRepo(workDirId) {
+  if (busyRows.has(workDirId)) return;
+  setRowBusy(workDirId, 'start');
+  try {
+    const res = await fetch('/api/repos/' + encodeURIComponent(workDirId) + '/start', { method: 'POST', headers: authHeaders() });
+    const data = await res.json();
+    if (res.ok) {
+      toast(data.resumed_live === false ? ('Started — not fully interactive: ' + (data.reason || '?')) : (data.resumed_live ? 'Session resumed' : 'Session started'), data.resumed_live === false ? 'info' : 'success');
+      setExpectedState(workDirId, 'running');
+    } else if (res.status === 409 && data && data.needs_new_session) {
+      // Cloud session is gone — open the confirmation dialog. The dialog's
+      // confirm handler wires up the actual /new-session call. We keep the
+      // busy lock active so the user can't double-click Start while the
+      // dialog is open; it's cleared on dialog Cancel or after /new-session.
+      setRowWorkingLabel(workDirId, 'Awaiting confirmation…');
+      openNewSessionDialog(workDirId, data.reason);
+    } else if (res.status === 409 && data && data.auth_invalid) {
+      toast(data.error || 'Auth invalid — open the Auth tab first', 'error');
+      clearRowBusy(workDirId, true);
+    } else if (res.status === 409 && data && data.error === 'already running') {
+      toast('Session already running', 'info');
+      setExpectedState(workDirId, 'running');
+    } else {
+      toast(data.error || 'Failed to start', 'error');
+      clearRowBusy(workDirId, true);
+    }
+  } catch(e) {
+    toast('Network error: ' + e.message, 'error');
+    clearRowBusy(workDirId, true);
+  }
+}
+
+function openNewSessionDialog(workDirId, reason) {
+  pendingNewSessionId = workDirId;
+  const dlg = document.getElementById('newSessionDialog');
+  const body = document.getElementById('newSessionDialogBody');
+  if (body) body.textContent = (reason || 'The kilo cloud session for this bucket is not active.') + ' Start a new session in the same work directory? Your file changes are preserved.';
+  if (dlg) dlg.style.display = 'flex';
+  const confirmBtn = document.getElementById('newSessionDialogConfirm');
+  if (confirmBtn) {
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = 'Start new session';
+    confirmBtn.onclick = confirmNewSession;
+  }
+}
+
+function closeNewSessionDialog() {
+  pendingNewSessionId = null;
+  const dlg = document.getElementById('newSessionDialog');
+  if (dlg) dlg.style.display = 'none';
+}
+
+// User clicked Cancel on the "needs new session" dialog. Clears the
+// busy lock set by startRepo so the row becomes clickable again. The
+// bucket's underlying state is unchanged (server did not act).
+function cancelNewSessionDialog() {
+  const workDirId = pendingNewSessionId;
+  pendingNewSessionId = null;
+  closeNewSessionDialog();
+  if (workDirId) clearRowBusy(workDirId, false);
+}
+
+async function confirmNewSession() {
+  const workDirId = pendingNewSessionId;
+  const confirmBtn = document.getElementById('newSessionDialogConfirm');
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<span class="spinner spinner-sm"></span> Starting…';
+  }
+  // Keep the row-busy lock from startRepo — the row stays dimmed while
+  // /new-session is in flight. Cleared in the success/error paths below.
+  setRowWorkingLabel(workDirId, 'Starting fresh…');
+  // Don't clear pendingNewSessionId yet — close the dialog, but the lock
+  // is held until the fetch resolves.
+  const dlg = document.getElementById('newSessionDialog');
+  if (dlg) dlg.style.display = 'none';
+
+  if (!workDirId) {
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Start new session'; }
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/repos/' + encodeURIComponent(workDirId) + '/new-session', { method: 'POST', headers: authHeaders() });
+    const data = await res.json();
+    if (res.ok) {
+      pendingNewSessionId = null;
+      toast(data.is_active_in_agent_dock === false ? ('Started — non-interactive: ' + (data.last_warning || '?')) : 'New session started', data.is_active_in_agent_dock === false ? 'info' : 'success');
+      setExpectedState(workDirId, 'running');
+    } else if (res.status === 409 && data && data.auth_invalid) {
+      pendingNewSessionId = null;
+      toast(data.error || 'Auth invalid — open the Auth tab first', 'error');
+      clearRowBusy(workDirId, true);
+    } else {
+      pendingNewSessionId = null;
+      toast(data.error || 'Failed to start new session', 'error');
+      clearRowBusy(workDirId, true);
+    }
+  } catch(e) {
+    pendingNewSessionId = null;
+    toast('Network error: ' + e.message, 'error');
+    clearRowBusy(workDirId, true);
+  } finally {
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Start new session'; }
+  }
 }
 
 function esc(s) {
@@ -916,59 +1217,104 @@ async function loadLogs() {
   }
 }
 
-function enterSpin(e) { if (e.key === 'Enter') spinUp(); }
+function enterSpin(e) { if (e.key === 'Enter') checkoutAndStart(); }
 repoUrlInput.addEventListener('keydown', enterSpin);
 branchInput.addEventListener('keydown', enterSpin);
 
-// Function to render sessions and their actions
-async function loadSessions() {
+// Function to render repo buckets and their actions
+async function loadRepos() {
   try {
-    const res = await fetch('/api/sessions', { headers: authHeaders() });
-    const sessions = await res.json();
-    if (sessions.length === 0) {
-      sessionsList.innerHTML = '<div class="empty">No active sessions. Spin one up above.</div>';
+    const res = await fetch('/api/repos', { headers: authHeaders() });
+    const repos = await res.json();
+    if (repos.length === 0) {
+      reposList.innerHTML = '<div class="empty">No repos checked out. Spin one up above.</div>';
       return;
     }
-    let html = '<table><thead><tr><th>Repository</th><th>Branch</th><th>Started</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
 
-    for (const s of sessions) {
-      const status = s.status || 'running'; // Default to running if status is missing
-      const dotClass = status === 'running' ? 'status-dot'
-                       : status === 'paused' ? 'status-dot-paused'
-                       : 'status-dot-stopped'; // Default for stopped, killed, error
-      const badgeClass = 'badge-' + status;
+    // Reconcile expected-state cleanup BEFORE rendering so the row-busy
+    // lock is cleared (and the new state's buttons rendered) for any
+    // bucket whose action just landed. The lock is also force-cleared
+    // after ~6 polls (≈18s) as a safety valve so a hung transition
+    // can't permanently disable a row.
+    const polledStates = new Map();
+    for (const r of repos) polledStates.set(r.work_dir_identifier, r.session_state || 'stopped');
+    for (const [workDirId, expected] of expectedNextState.entries()) {
+      if (!polledStates.has(workDirId)) {
+        // Row disappeared (likely deleted) — no longer our concern.
+        expectedNextState.delete(workDirId);
+        expectedStateSeenAt.delete(workDirId);
+        busyRows.delete(workDirId);
+        rowWorkingLabel.delete(workDirId);
+        continue;
+      }
+      const actual = polledStates.get(workDirId);
+      const n = (expectedStateSeenAt.get(workDirId) || 0) + 1;
+      if (actual === expected) {
+        // Confirmed — clear the busy lock so the fresh-state buttons
+        // render in this paint. A tiny delay lets the success toast
+        // settle first.
+        clearRowBusy(workDirId, false);
+      } else if (n >= 6) {
+        // Safety valve — state didn't converge in ~18s. Unlock so the
+        // user can retry; surface a soft warning toast once.
+        clearRowBusy(workDirId, false);
+        toast('Action took too long to confirm — row unlocked (you can retry)', 'info');
+      } else {
+        expectedStateSeenAt.set(workDirId, n);
+      }
+    }
 
+    let html = '<table><thead><tr><th>Repository</th><th>Branch</th><th>Cloud</th><th>Started</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+
+    for (const r of repos) {
+      const state = r.session_state || 'stopped';
+      const stateLabel = state === 'running' ? 'InProgress'
+                       : state === 'paused'  ? 'Paused'
+                       : state === 'killed'  ? 'Killed'
+                       : 'Stopped';
+      const dotClass = state === 'running' ? 'status-dot'
+                       : state === 'paused' ? 'status-dot-paused'
+                       : 'status-dot-stopped';
+      const badgeClass = 'badge-' + state;
+
+      const cloudDot = r.cloud_session_status === 'active'  ? '<span class="status-dot" title="cloud session active"></span>'
+                     : r.cloud_session_status === 'deleted' ? '<span class="status-dot-stopped" title="cloud session deleted"></span>'
+                     : '<span class="status-dot-paused" title="cloud liveness unknown"></span>';
+
+      const wid = r.work_dir_identifier;
+      const isBusy = busyRows.has(wid);
       let actions = '';
-      // Generate action buttons with unique IDs for state management
-      if (status === 'running') {
-        actions = `<button type="button" class="btn btn-warning btn-sm" id="pause-${s.id}" onclick="pauseSession('${s.id}')">Pause</button>`;
-      } else if (status === 'paused') {
-        actions += `<button type="button" class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
-        actions += `<button type="button" class="btn btn-danger btn-sm" id="kill-${s.id}" onclick="killSession('${s.id}')">Kill</button>`;
-      } else if (status === 'stopped' || status === 'error') {
-        actions += `<button type="button" class="btn btn-primary btn-sm" id="resume-${s.id}" onclick="resumeSession('${s.id}')">Resume</button> `;
-        actions += `<button type="button" class="btn btn-danger btn-sm" id="kill-${s.id}" onclick="killSession('${s.id}')">Kill</button>`;
-      } else { // For 'killed' or any other terminal status
-        actions = `<span class="badge badge-killed">Killed</span>`; // Show as killed if state is terminal
-        if (s.exit_code != null) {
-            actions += ` <span style="color:#64748b;font-size:0.8rem">Exit: ${s.exit_code}</span>`;
-        }
+
+      if (isBusy) {
+        const label = rowWorkingLabel.get(wid) || 'Working…';
+        actions = '<span class="row-working"><span class="spinner spinner-sm"></span>' + esc(label) + '</span>';
+      } else if (state === 'running') {
+        actions  = `<button type="button" class="btn btn-warning btn-sm" id="pause-${esc(wid)}" onclick="pauseRepo('${esc(wid)}')">Pause</button> `;
+        actions += `<button type="button" class="btn btn-danger btn-sm" id="kill-${esc(wid)}" onclick="killRepo('${esc(wid)}')">Kill</button> `;
+      } else if (state === 'paused' || state === 'stopped') {
+        actions  = `<button type="button" class="btn btn-primary btn-sm" id="start-${esc(wid)}" onclick="startRepo('${esc(wid)}')">Start</button> `;
+        actions += `<button type="button" class="btn btn-danger btn-sm" id="kill-${esc(wid)}" onclick="killRepo('${esc(wid)}')">Kill</button> `;
+      } else if (state === 'killed') {
+        actions  = `<button type="button" class="btn btn-primary btn-sm" id="start-${esc(wid)}" onclick="startRepo('${esc(wid)}')" title="no cloud session on record — start a fresh one">Start</button> `;
+      }
+      if (!isBusy) {
+        // Delete is always available — works even when running (calls kill first).
+        actions += `<button type="button" class="btn btn-danger btn-sm" id="delete-${esc(wid)}" onclick="deleteRepo('${esc(wid)}')">Delete</button>`;
       }
 
-      html += '<tr>' +
-              '<td data-label="Repository"><div class="repo-name">' + esc(s.repo_name) + '</div><div class="repo-url">' + esc(s.repo_url) + '</div></td>' +
-              '<td data-label="Branch" style="color:var(--text-secondary);font-size:0.85rem">' + esc(s.branch || 'default') + '</td>' +
-              '<td data-label="Started" style="color:var(--text-secondary);font-size:0.85rem">' + timeAgo(s.started_at) + '</td>' +
-              '<td data-label="Status"><span class="' + dotClass + '"></span><span class="badge ' + badgeClass + '">' + esc(status) + '</span></td>' +
+      html += '<tr data-repo-id="' + esc(wid) + '"' + (isBusy ? ' class="row-busy"' : '') + '>' +
+              '<td data-label="Repository"><div class="repo-name">' + esc(r.repo_name) + '</div><div class="repo-url">' + esc(r.repo_url) + '</div></td>' +
+              '<td data-label="Branch" style="color:var(--text-secondary);font-size:0.85rem" title="snapshot from checkout — switch inside the TUI as needed">' + esc(r.branch || 'main') + '</td>' +
+              '<td data-label="Cloud">' + cloudDot + ' <span style="font-size:0.8rem;color:var(--text-secondary)">' + esc(r.cloud_session_status || 'unknown') + '</span></td>' +
+              '<td data-label="Started" style="color:var(--text-secondary);font-size:0.85rem">' + timeAgo(r.started_at) + '</td>' +
+              '<td data-label="Status"><span class="' + dotClass + '"></span><span class="badge ' + badgeClass + '">' + esc(stateLabel) + '</span></td>' +
               '<td data-label="Actions" style="text-align:right">' + actions + '</td>' +
               '</tr>';
     }
     html += '</tbody></table>';
-    sessionsList.innerHTML = html;
+    reposList.innerHTML = html;
   } catch(e) {
-    // Ignore polling errors silently, but could log them
-    // console.error("Error loading sessions:", e);
-    sessionsList.innerHTML = '<div class="empty">Failed to load sessions.</div>';
+    reposList.innerHTML = '<div class="empty">Failed to load repo list.</div>';
   }
 }
 
@@ -979,11 +1325,11 @@ handleHash();
 window.addEventListener('hashchange', handleHash);
 window.addEventListener('popstate', handleHash);
 
-loadSessions();
+loadRepos();
 loadDiag();
 loadLogs();
 checkAuth();
-setInterval(loadSessions, 3000); // Poll sessions every 3 seconds
+setInterval(loadRepos, 3000); // Poll repo buckets every 3 seconds
 setInterval(loadDiag, 5000);   // Poll diagnostics every 5 seconds
 setInterval(loadLogs, 5000);   // Poll logs every 5 seconds
 document.getElementById('logPanel').addEventListener('scroll', function() {

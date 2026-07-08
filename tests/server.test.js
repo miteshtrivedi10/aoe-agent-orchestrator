@@ -11,7 +11,7 @@ function reloadServer(envOverrides = {}) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
-  for (const mod of ["/server.js", "/lib/logger.js", "/lib/auth.js", "/lib/sessions.js", "/lib/kilo.js"]) {
+  for (const mod of ["/server.js", "/lib/logger.js", "/lib/auth.js", "/lib/repos.js", "/lib/kilo.js"]) {
     const full = path.resolve(__dirname, ".." + mod);
     delete require.cache[require.resolve(full)];
   }
@@ -62,6 +62,22 @@ describe("server", () => {
       child.kill = () => {};
       return child;
     });
+    // Mock node-pty's spawn so /api/auth/login and startKiloSession don't
+    // launch a real kilo process (which would open a browser auth page).
+    const pty = require("node-pty");
+    mock.method(pty, "spawn", () => {
+      const fake = new (require("events").EventEmitter)();
+      fake.pid = 99999;
+      fake.write = () => {};
+      fake.kill = () => {};
+      fake.resize = () => {};
+      fake.on = fake.addListener;
+      return fake;
+    });
+    // Default to valid auth (KILO_API_KEY set) so auth pre-flight lets
+    // requests through. Tests that explicitly check the 409 path can
+    // override by deleting process.env.KILO_API_KEY in the test body.
+    process.env.KILO_API_KEY = "kilo_test_key";
     mock.method(fs, "mkdirSync", () => {});
     const origReadFileSync = fs.readFileSync;
     mock.method(fs, "readFileSync", (fp, ...args) => {
@@ -85,11 +101,6 @@ describe("server", () => {
       AGENT_DOCK_DEFAULT_MODEL: "kilo/kilo-auto/free",
     });
 
-    // server.js calls app.listen(0, "0.0.0.0", cb) with PORT=0, which picks a
-    // random port. We need to find that port. The app is an Express app, and
-    // its listen() returns an http.Server. We can't easily get the port after
-    // the fact, so we create a fresh server ourselves.
-    // Instead, we extract the app from the module and create our own listener.
     server = http.createServer(app);
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address();
@@ -101,6 +112,7 @@ describe("server", () => {
   afterEach((_, done) => {
     mock.restoreAll();
     delete global.fetch;
+    delete process.env.KILO_API_KEY;
     if (server) {
       server.close(() => done());
     } else {
@@ -117,290 +129,329 @@ describe("server", () => {
   });
 
   describe("GET /api/status", () => {
-    it("returns version and model info", async () => {
+    it("returns version and model info; reports repo_count (not session_count)", async () => {
+      // patch loadRepos to return 2 buckets
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => [{ work_dir_identifier: "a" }, { work_dir_identifier: "b" }]);
       const res = await req(baseUrl, "GET", "/api/status");
       assert.equal(res.status, 200);
       assert.equal(res.body.kilo_version, "7.3.54");
       assert.equal(res.body.daemon_running, false);
+      assert.equal(res.body.repo_count, 2);
+      assert.ok(!("session_count" in res.body), "must not expose legacy session_count");
       assert.ok(res.body.api_security.token_required);
     });
   });
 
-  describe("GET /api/sessions", () => {
+  describe("GET /api/repos", () => {
     it("returns 401 without auth", async () => {
-      const res = await req(baseUrl, "GET", "/api/sessions");
+      const res = await req(baseUrl, "GET", "/api/repos");
       assert.equal(res.status, 401);
     });
-
-    it("returns sessions with valid auth", async () => {
-      const res = await req(baseUrl, "GET", "/api/sessions", {
-        "Authorization": "Bearer test-server-token",
-      });
+    it("returns repo buckets array with valid auth", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => [{ work_dir_identifier: "xyz", session_state: "running" }]);
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "updateStatus", (r) => r);
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "saveRepos", () => {});
+      const res = await req(baseUrl, "GET", "/api/repos", { "Authorization": "Bearer test-server-token" });
       assert.equal(res.status, 200);
       assert.ok(Array.isArray(res.body));
     });
   });
 
-  describe("POST /api/spin-up", () => {
+  describe("GET /api/repos/:workDirId (single-bucket detail)", () => {
+    it("returns 404 for unknown bucket", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => []);
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "updateStatus", (r) => r);
+      const res = await req(baseUrl, "GET", "/api/repos/nope", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 404);
+    });
+  });
+
+  describe("POST /api/repos/checkout", () => {
     it("returns 401 without auth", async () => {
-      const res = await req(baseUrl, "POST", "/api/spin-up", {}, { repo_url: "x.git" });
+      const res = await req(baseUrl, "POST", "/api/repos/checkout", {}, { repo_url: "x.git" });
       assert.equal(res.status, 401);
     });
-
     it("rejects missing repo_url", async () => {
-      const res = await req(baseUrl, "POST", "/api/spin-up", {
+      const res = await req(baseUrl, "POST", "/api/repos/checkout", {
         "Authorization": "Bearer test-server-token",
       }, {});
       assert.equal(res.status, 400);
       assert.equal(res.body.error, "repo_url required");
     });
-
     it("rejects non-.git URL", async () => {
-      const res = await req(baseUrl, "POST", "/api/spin-up", {
+      const res = await req(baseUrl, "POST", "/api/repos/checkout", {
         "Authorization": "Bearer test-server-token",
       }, { repo_url: "https://example.com/no-suffix", branch: "main" });
       assert.equal(res.status, 400);
       assert.match(res.body.error, /must end in \.git/);
     });
-
-    it("rejects missing branch", async () => {
-      const res = await req(baseUrl, "POST", "/api/spin-up", {
-        "Authorization": "Bearer test-server-token",
-      }, { repo_url: "https://example.com/repo.git" });
-      assert.equal(res.status, 400);
-      assert.match(res.body.error, /branch required/);
-    });
-
     it("rejects invalid branch", async () => {
-      const res = await req(baseUrl, "POST", "/api/spin-up", {
+      const res = await req(baseUrl, "POST", "/api/repos/checkout", {
         "Authorization": "Bearer test-server-token",
       }, { repo_url: "https://example.com/repo.git", branch: "bad branch" });
       assert.equal(res.status, 400);
       assert.match(res.body.error, /branch contains characters/);
     });
-
-    it("accepts valid URL with .git and branch", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "checkoutRepo", () => ({ workDir: "/tmp/test" }));
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => []);
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
-      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "startKiloSession", () => ({
-        pid: 12345, cloudSessionId: "ses_test123", ptyProcess: { write: () => {} },
-      }));
-
-      const res = await req(baseUrl, "POST", "/api/spin-up", {
+    it("returns 409 already-checked-out when bucket exists for same repo_url", async () => {
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      mock.method(reposLib, "loadRepos", () => [{ work_dir_identifier: "repo", repo_url: "https://example.com/repo.git", session_state: "running" }]);
+      mock.method(reposLib, "bucketIdentifier", () => "repo");
+      const res = await req(baseUrl, "POST", "/api/repos/checkout", {
         "Authorization": "Bearer test-server-token",
       }, { repo_url: "https://example.com/repo.git", branch: "main" });
-      assert.equal(res.status, 201);
-      assert.ok(res.body.id);
-      assert.equal(res.body.status, "running");
-      assert.equal(res.body.cloud_session_id, "ses_test123");
+      assert.equal(res.status, 409);
+      assert.equal(res.body.error, "already checked out");
+      assert.equal(res.body.work_dir_identifier, "repo");
+    });
+    it("returns 409 bucket-collision when same identifier exists with different repo_url", async () => {
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      mock.method(reposLib, "loadRepos", () => [{ work_dir_identifier: "repo", repo_url: "https://OTHER.com/repo.git" }]);
+      mock.method(reposLib, "bucketIdentifier", () => "repo");
+      const res = await req(baseUrl, "POST", "/api/repos/checkout", {
+        "Authorization": "Bearer test-server-token",
+      }, { repo_url: "https://example.com/repo.git", branch: "main" });
+      assert.equal(res.status, 409);
+      assert.match(res.body.error, /bucket collision/);
+      assert.equal(res.body.existing_repo_url, "https://OTHER.com/repo.git");
     });
   });
 
-  describe("POST /api/kill/:sessionId", () => {
-    it("returns 404 for unknown session", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => []);
-      const res = await req(baseUrl, "POST", "/api/kill/unknown", {
-        "Authorization": "Bearer test-server-token",
-      });
+  describe("POST /api/repos/:workDirId/pause", () => {
+    it("returns 404 for unknown bucket", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => []);
+      const res = await req(baseUrl, "POST", "/api/repos/nope/pause", { "Authorization": "Bearer test-server-token" });
       assert.equal(res.status, 404);
     });
+    it("returns 409 when not running", async () => {
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      mock.method(reposLib, "loadRepos", () => [{ work_dir_identifier: "xyz", session_state: "paused" }]);
+      mock.method(reposLib, "updateStatus", (r) => r);
+      mock.method(reposLib, "saveRepos", () => {});
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/pause", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 409);
+    });
+    it("pauses running bucket, keeps kilo_session_id preserved", async () => {
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      const saved = [];
+      mock.method(reposLib, "loadRepos", () => [{ work_dir_identifier: "xyz", session_state: "running", pid: 999999, kilo_session_id: "ses_keep" }]);
+      mock.method(reposLib, "updateStatus", (r) => r);
+      mock.method(reposLib, "saveRepos", (r) => { saved.push(...r); });
+      mock.method(reposLib, "terminateProcess", async () => {});
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/pause", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 200);
+      assert.equal(res.body.session_state, "paused");
+      assert.equal(saved[0].kilo_session_id, "ses_keep", "pause MUST preserve kilo_session_id");
+      assert.equal(saved[0].pid, null);
+    });
+  });
 
-    it("kills known session", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test-kill", pid: 999999, status: "running", work_dir: "/tmp/nonexist" },
+  describe("POST /api/repos/:workDirId/kill", () => {
+    it("returns 404 for unknown bucket", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => []);
+      const res = await req(baseUrl, "POST", "/api/repos/nope/kill", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 404);
+    });
+    it("kills bucket + preserves work_dir + transitions to killed", async () => {
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      const saved = [];
+      mock.method(reposLib, "loadRepos", () => [{ work_dir_identifier: "xyz", session_state: "running", pid: 999999, work_dir: "/data/repos/xyz", kilo_session_id: "ses_x" }]);
+      mock.method(reposLib, "updateStatus", (r) => r);
+      mock.method(reposLib, "saveRepos", (r) => { saved.push(...r); });
+      mock.method(reposLib, "terminateProcess", async () => {});
+      mock.method(reposLib, "deleteCloudSession", () => ({ ok: true, reason: "deleted" }));
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/kill", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 200);
+      assert.equal(res.body.session_state, "killed");
+      assert.equal(res.body.work_dir_preserved, true);
+      // Registry entry MUST still exist (kept bucket).
+      assert.equal(saved.length, 1);
+      assert.equal(saved[0].work_dir_identifier, "xyz");
+      assert.equal(saved[0].work_dir, "/data/repos/xyz", "kill MUST preserve work_dir");
+    });
+  });
+
+  describe("DELETE /api/repos/:workDirId", () => {
+    it("removes work_dir + registry entry on delete", async () => {
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      const saved = [];
+      mock.method(reposLib, "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "running", pid: 999999, work_dir: "/data/repos/xyz", kilo_session_id: "ses_x" },
+        { work_dir_identifier: "abc", session_state: "stopped", work_dir: "/data/repos/abc" },
       ]);
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
+      mock.method(reposLib, "updateStatus", (r) => r);
+      mock.method(reposLib, "saveRepos", (r) => { saved.push(...r); });
+      mock.method(reposLib, "terminateProcess", async () => {});
+      mock.method(reposLib, "deleteCloudSession", () => ({ ok: true }));
+      mock.method(fs, "existsSync", () => true);
+      mock.method(fs, "rmSync", () => {});
       mock.method(fs, "unlinkSync", () => {});
-
-      const res = await req(baseUrl, "POST", "/api/kill/test-kill", {
-        "Authorization": "Bearer test-server-token",
-      });
+      const res = await req(baseUrl, "DELETE", "/api/repos/xyz", { "Authorization": "Bearer test-server-token" });
       assert.equal(res.status, 200);
-      assert.equal(res.body.status, "killed");
+      assert.equal(res.body.deleted, true);
+      assert.equal(saved.length, 1);
+      assert.equal(saved[0].work_dir_identifier, "abc", "xyz must be removed; abc remains");
     });
   });
 
-  describe("POST /api/sessions/:id/pause", () => {
-    it("returns 404 for unknown", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => []);
-      const res = await req(baseUrl, "POST", "/api/sessions/unknown/pause", {
-        "Authorization": "Bearer test-server-token",
-      });
-      assert.equal(res.status, 404);
-    });
-
-    it("pauses running session", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test-pause", pid: 999999, status: "running" },
-      ]);
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
-
-      const res = await req(baseUrl, "POST", "/api/sessions/test-pause/pause", {
-        "Authorization": "Bearer test-server-token",
-      });
-      assert.equal(res.status, 200);
-      assert.equal(res.body.status, "paused");
-    });
-
-    it("returns 409 for non-running session", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test-stopped", pid: 999999, status: "stopped" },
-      ]);
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
-
-      const res = await req(baseUrl, "POST", "/api/sessions/test-stopped/pause", {
-        "Authorization": "Bearer test-server-token",
-      });
-      assert.equal(res.status, 409);
-    });
-  });
-
-  describe("POST /api/sessions/:id/continue", () => {
-    it("requires prompt in body", async () => {
-      const res = await req(baseUrl, "POST", "/api/sessions/test/continue", {
-        "Authorization": "Bearer test-server-token",
-      }, {});
-      assert.equal(res.status, 400);
-    });
-
-    it("returns 404 when session not found", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => []);
-      const res = await req(baseUrl, "POST", "/api/sessions/unknown/continue", {
+  describe("POST /api/repos/:workDirId/continue", () => {
+    it("returns 404 when bucket not found", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => []);
+      const res = await req(baseUrl, "POST", "/api/repos/nope/continue", {
         "Authorization": "Bearer test-server-token",
       }, { prompt: "test" });
       assert.equal(res.status, 404);
     });
-
-    it("returns 409 when no cloud_session_id", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test", status: "stopped", work_dir: "/tmp/test" },
+    it("returns 409 when no kilo_session_id on bucket", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "stopped", work_dir: "/tmp/test" },
       ]);
-      const res = await req(baseUrl, "POST", "/api/sessions/test/continue", {
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/continue", {
         "Authorization": "Bearer test-server-token",
       }, { prompt: "test" });
       assert.equal(res.status, 409);
-      assert.match(res.body.error, /no cloud_session_id/);
+      assert.match(res.body.error, /no kilo_session_id/);
     });
-
     it("returns 409 when session is running", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test", status: "running", cloud_session_id: "ses_xxx", work_dir: "/tmp/test" },
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "running", kilo_session_id: "ses_x", work_dir: "/tmp/test" },
       ]);
-      const res = await req(baseUrl, "POST", "/api/sessions/test/continue", {
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/continue", {
         "Authorization": "Bearer test-server-token",
       }, { prompt: "test" });
       assert.equal(res.status, 409);
     });
-
-    it("spawns kilo run for continue", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test-cont", status: "stopped", cloud_session_id: "ses_abc", work_dir: "/tmp/test" },
+    it("spawns kilo run for continue when stopped + has kilo_session_id", async () => {
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      mock.method(reposLib, "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "stopped", kilo_session_id: "ses_abc", work_dir: "/tmp/test" },
       ]);
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
+      mock.method(reposLib, "saveRepos", () => {});
+      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "writeProjectConfig", () => {});
       mock.method(fs, "openSync", () => 999);
       mock.method(fs, "closeSync", () => {});
-
-      const res = await req(baseUrl, "POST", "/api/sessions/test-cont/continue", {
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/continue", {
         "Authorization": "Bearer test-server-token",
       }, { prompt: "continue work" });
       assert.equal(res.status, 202);
-      assert.equal(res.body.cloud_session_id, "ses_abc");
+      assert.equal(res.body.kilo_session_id, "ses_abc");
       assert.equal(res.body.prompt_excerpt, "continue work");
     });
   });
 
-  describe("POST /api/sessions/:id/resume", () => {
-    it("returns 404 when session not found", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => []);
-      const res = await req(baseUrl, "POST", "/api/sessions/unknown/resume", {
-        "Authorization": "Bearer test-server-token",
-      });
+  describe("POST /api/repos/:workDirId/start (smart resume)", () => {
+    it("returns 404 when bucket not found", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => []);
+      const res = await req(baseUrl, "POST", "/api/repos/nope/start", { "Authorization": "Bearer test-server-token" });
       assert.equal(res.status, 404);
     });
-
-    it("returns 409 when session is running", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test", status: "running", cloud_session_id: "ses_xxx", work_dir: "/tmp/test" },
+    it("returns 409 already running", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "running", cloud_session_id: "ses_x", work_dir: "/tmp/test" },
       ]);
-      const res = await req(baseUrl, "POST", "/api/sessions/test/resume", {
-        "Authorization": "Bearer test-server-token",
-      });
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "updateStatus", (r) => r);
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/start", { "Authorization": "Bearer test-server-token" });
       assert.equal(res.status, 409);
+      assert.match(res.body.error, /already running/);
     });
-
-    it("returns 409 when session is killed", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test", status: "killed", cloud_session_id: "ses_xxx", work_dir: "/tmp/test" },
+    it("returns 409 needs_new_session when bucket has no kilo_session_id", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "paused", work_dir: "/tmp/test" },
       ]);
-      const res = await req(baseUrl, "POST", "/api/sessions/test/resume", {
-        "Authorization": "Bearer test-server-token",
-      });
-      assert.equal(res.status, 409);
-    });
-
-    it("returns 409 when no cloud_session_id", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test", status: "paused", work_dir: "/tmp/test" },
-      ]);
-      const res = await req(baseUrl, "POST", "/api/sessions/test/resume", {
-        "Authorization": "Bearer test-server-token",
-      });
-      assert.equal(res.status, 409);
-    });
-
-    it("starts fresh session when no cloud_session_id", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test-noid", status: "paused", work_dir: "/tmp/test" },
-      ]);
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "updateStatus", (r) => r);
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "saveRepos", () => {});
       mock.method(fs, "existsSync", () => true);
-      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "resumeKiloSession", () => Promise.resolve({ pid: 11111, started: true }));
-      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "startKiloSession", () => Promise.resolve({ pid: 22222, cloudSessionId: "ses_new", started: true }));
-
-      const res = await req(baseUrl, "POST", "/api/sessions/test-noid/resume", {
-        "Authorization": "Bearer test-server-token",
-      });
-      assert.equal(res.status, 202);
-      assert.equal(res.body.pid, 22222);
-      assert.equal(res.body.cloud_session_id, "ses_new");
-      assert.equal(res.body.status, "running");
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/start", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 409);
+      assert.equal(res.body.needs_new_session, true);
     });
-
-    it("starts fresh session when cloud session was deleted", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test-del", status: "paused", cloud_session_id: "ses_deleted", work_dir: "/tmp/test" },
+    it("returns 409 needs_new_session + cloud_session_deleted when resume reports importFailed", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "paused", kilo_session_id: "ses_dead", work_dir: "/tmp/test" },
       ]);
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "updateStatus", (r) => r);
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "saveRepos", () => {});
       mock.method(fs, "existsSync", () => true);
-      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "resumeKiloSession", () => Promise.resolve({ pid: 33333, started: false, importFailed: true, reason: "cloud_session_deleted" }));
-      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "startKiloSession", () => Promise.resolve({ pid: 44444, cloudSessionId: "ses_fresh", started: true }));
-
-      const res = await req(baseUrl, "POST", "/api/sessions/test-del/resume", {
-        "Authorization": "Bearer test-server-token",
-      });
-      assert.equal(res.status, 202);
-      assert.equal(res.body.pid, 44444);
-      assert.equal(res.body.cloud_session_id, "ses_fresh");
+      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "resumeKiloSession", () =>
+        Promise.resolve({ pid: 33333, started: false, importFailed: true, reason: "cloud_session_deleted" }));
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/start", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 409);
+      assert.equal(res.body.needs_new_session, true);
       assert.equal(res.body.cloud_session_deleted, true);
-      assert.ok(res.body.message.includes("deleted"));
+    });
+    it("resumes via resumeKiloSession when cloud session is alive", async () => {
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      const saved = [];
+      mock.method(reposLib, "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "paused", kilo_session_id: "ses_alive", work_dir: "/tmp/test" },
+      ]);
+      mock.method(reposLib, "updateStatus", (r) => r);
+      mock.method(reposLib, "saveRepos", (r) => { saved.push(...r); });
+      mock.method(fs, "existsSync", () => true);
+      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "resumeKiloSession", () =>
+        Promise.resolve({ pid: 12345, cloudSessionId: "ses_alive", started: true }));
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/start", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 202);
+      assert.equal(res.body.kilo_session_id, "ses_alive");
+      assert.equal(res.body.pid, 12345);
+      assert.equal(res.body.session_state, "running");
+      assert.equal(saved[0].cloud_session_status, "active");
+    });
+  });
+
+  describe("POST /api/repos/:workDirId/new-session", () => {
+    it("returns 404 when bucket not found", async () => {
+      mock.method(require(path.resolve(__dirname, "../lib/repos.js")), "loadRepos", () => []);
+      const res = await req(baseUrl, "POST", "/api/repos/nope/new-session", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 404);
+    });
+    it("starts fresh kilo session in existing work dir", async () => {
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      const saved = [];
+      mock.method(reposLib, "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "paused", kilo_session_id: "ses_old", work_dir: "/tmp/test" },
+      ]);
+      mock.method(reposLib, "updateStatus", (r) => r);
+      mock.method(reposLib, "saveRepos", (r) => { saved.push(...r); });
+      mock.method(fs, "existsSync", () => true);
+      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "startKiloSession", () =>
+        Promise.resolve({ pid: 55555, cloudSessionId: "ses_new", started: true }));
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/new-session", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 202);
+      assert.equal(res.body.kilo_session_id, "ses_new");
+      assert.equal(res.body.pid, 55555);
+      assert.equal(res.body.session_state, "running");
+      assert.equal(saved[0].cloud_session_deleted, false);
+      assert.equal(saved[0].cloud_session_status, "active");
+    });
+  });
+
+  describe("Auth pre-flight rejection (Q6)", () => {
+    // The auth.json file is mocked as missing in beforeEach
+    // (statSync throws ENOENT), so inspectAuth() returns invalid at startup.
+
+    it("checkout returns 409 when auth invalid", async () => {
+      // Force auth check to be invalid by deleting KILO_API_KEY and
+      // ensuring auth.json is absent (statSync mock throws ENOENT).
+      delete process.env.KILO_API_KEY;
+      const res = await req(baseUrl, "POST", "/api/repos/checkout", {
+        "Authorization": "Bearer test-server-token",
+      }, { repo_url: "https://example.com/repo.git", branch: "main" });
+      assert.equal(res.status, 409);
+      assert.equal(res.body.auth_invalid, true);
+      assert.match(res.body.error, /auth invalid/);
     });
 
-    it("respawns TUI PTY via resumeKiloSession", async () => {
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "loadSessions", () => [
-        { id: "test-resume", status: "paused", cloud_session_id: "ses_abc", work_dir: "/tmp/test" },
+    it("start returns 409 when auth invalid (no bucket)", async () => {
+      delete process.env.KILO_API_KEY;
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      mock.method(reposLib, "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "paused", kilo_session_id: "ses_x", work_dir: "/tmp/test" },
       ]);
-      mock.method(require(path.resolve(__dirname, "../lib/sessions.js")), "saveSessions", () => {});
+      mock.method(reposLib, "updateStatus", (r) => r);
       mock.method(fs, "existsSync", () => true);
-      mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "resumeKiloSession", () => Promise.resolve({ pid: 12345 }));
-
-      const res = await req(baseUrl, "POST", "/api/sessions/test-resume/resume", {
-        "Authorization": "Bearer test-server-token",
-      });
-      assert.equal(res.status, 202);
-      assert.equal(res.body.cloud_session_id, "ses_abc");
-      assert.equal(res.body.pid, 12345);
-      assert.equal(res.body.status, "running");
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/start", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 409);
+      assert.equal(res.body.auth_invalid, true);
     });
   });
 
@@ -409,7 +460,6 @@ describe("server", () => {
       const res = await req(baseUrl, "GET", "/api/relay-check");
       assert.equal(res.status, 401);
     });
-
     it("does NOT leak token in response", async () => {
       const res = await req(baseUrl, "GET", "/api/relay-check", {
         "Authorization": "Bearer test-server-token",
@@ -426,7 +476,6 @@ describe("server", () => {
       const res = await req(baseUrl, "GET", "/api/diagnostics");
       assert.equal(res.status, 401);
     });
-
     it("does NOT leak token in relay field", async () => {
       const res = await req(baseUrl, "GET", "/api/diagnostics", {
         "Authorization": "Bearer test-server-token",
@@ -443,7 +492,6 @@ describe("server", () => {
       const res = await req(baseUrl, "GET", "/api/logs");
       assert.equal(res.status, 401);
     });
-
     it("returns log lines", async () => {
       const res = await req(baseUrl, "GET", "/api/logs", {
         "Authorization": "Bearer test-server-token",
@@ -454,7 +502,7 @@ describe("server", () => {
     });
   });
 
-  describe("GET /api/logs/session/:id", () => {
+  describe("GET /api/logs/session/:id (relabelled: id is now work_dir_identifier)", () => {
     it("requires auth", async () => {
       const res = await req(baseUrl, "GET", "/api/logs/session/test");
       assert.equal(res.status, 401);
@@ -474,13 +522,11 @@ describe("server", () => {
       assert.equal(res.status, 200);
       assert.equal(res.body.status, "idle");
     });
-
     it("POST /api/auth/login returns pending", async () => {
       const res = await req(baseUrl, "POST", "/api/auth/login");
       assert.equal(res.status, 200);
       assert.equal(res.body.status, "pending");
     });
-
     it("POST /api/auth/cancel returns cancelled", async () => {
       const res = await req(baseUrl, "POST", "/api/auth/cancel");
       assert.equal(res.status, 200);
@@ -490,28 +536,36 @@ describe("server", () => {
 
   describe("X-Agent-Dock-Token auth", () => {
     it("works for gated endpoints", async () => {
-      const res = await req(baseUrl, "GET", "/api/sessions", {
+      const res = await req(baseUrl, "GET", "/api/repos", {
         "X-Agent-Dock-Token": "test-server-token",
       });
       assert.equal(res.status, 200);
     });
-
     it("rejects wrong X-Agent-Dock-Token", async () => {
-      const res = await req(baseUrl, "GET", "/api/sessions", {
+      const res = await req(baseUrl, "GET", "/api/repos", {
         "X-Agent-Dock-Token": "wrong-token",
       });
       assert.equal(res.status, 403);
     });
   });
 
-  describe("Removed endpoints", () => {
-    it("/api/logs/daemon returns 404", async () => {
-      const res = await req(baseUrl, "GET", "/api/logs/daemon");
+  describe("Removed legacy endpoints", () => {
+    it("/api/spin-up returns 404", async () => {
+      const res = await req(baseUrl, "POST", "/api/spin-up", {
+        "Authorization": "Bearer test-server-token",
+      }, { repo_url: "x.git" });
       assert.equal(res.status, 404);
     });
-
-    it("/api/logs/remote returns 404", async () => {
-      const res = await req(baseUrl, "GET", "/api/logs/remote");
+    it("/api/sessions returns 404", async () => {
+      const res = await req(baseUrl, "GET", "/api/sessions", {
+        "Authorization": "Bearer test-server-token",
+      });
+      assert.equal(res.status, 404);
+    });
+    it("/api/kill/:id returns 404", async () => {
+      const res = await req(baseUrl, "POST", "/api/kill/xyz", {
+        "Authorization": "Bearer test-server-token",
+      });
       assert.equal(res.status, 404);
     });
   });
