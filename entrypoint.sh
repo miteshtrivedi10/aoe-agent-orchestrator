@@ -7,6 +7,11 @@ mkdir -p /data/kilo /data/repos
 # Git safe.directory — /data is HF persistent storage, may have mismatched UID
 git config --global safe.directory '*'
 
+# Git identity — required by git commit and pre-commit hooks. The agent uses this
+# as the committer name/email. Override via GIT_USER_NAME and GIT_USER_EMAIL env vars.
+git config --global user.name "${GIT_USER_NAME:-Agent Dock}"
+git config --global user.email "${GIT_USER_EMAIL:-agent-dock@local}"
+
 # ── GitHub Credentials for Push ──────────────────────────────────
 # When GITHUB_TOKEN is provided (HF secret or env var), configure git so that
 # pushes to github.com are authenticated automatically. `url.<base>.insteadOf`

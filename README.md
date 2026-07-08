@@ -34,6 +34,8 @@ All configuration is passed via environment variables. You can pass each key ind
 | `AGENT_DOCK_API_TOKEN` | optional | Bearer token for API and UI authentication. Auto-generated 48-char hex if omitted — the token is never logged, only its length. |
 | `KILO_API_KEY` | recommended | Kilo Cloud authentication key. Written to `auth.json` on boot. Without it, the session still runs locally but cannot relay to the Cloud Dashboard or mobile app. |
 | `GITHUB_TOKEN` | optional | GitHub personal access token. Enables cloning private repos and authenticates `git push` to github.com via a `url.insteadOf` rewrite configured at startup. Without it, pushes to github.com fail with "no stored credentials". |
+| `GIT_USER_NAME` | optional | Git committer name. Required by `git commit` and pre-commit hooks. Default: `Agent Dock`. |
+| `GIT_USER_EMAIL` | optional | Git committer email. Required by `git commit` and pre-commit hooks. Default: `agent-dock@local`. |
 | `CONTEXT7_API_KEY` | optional | API key for the Context7 MCP server. Enables the agent to query live library documentation during sessions. |
 | `OPENROUTER_API_KEY` | optional | OpenRouter provider key. Grants access to additional models (Claude, GPT-4, etc.) through OpenRouter's API. |
 | `OPENCODE_API_KEY` | optional | OpenCode provider key (zen/v1 endpoint). Alternative model access. |
