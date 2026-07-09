@@ -179,7 +179,7 @@ To use a model provider other than the default Kilo backend:
 
 Agent Dock passes the model selection to Kilo at session start. Kilo handles the actual API calls.
 
-**Cloud Dashboard visibility.** Every provider declared in `kilo.jsonc` — including custom OpenAI-compatible ones with a `baseURL` — is relayed to the Kilo Cloud Dashboard's model picker for `/remote` sessions via the `list_models` protocol (kilo 7.4.x, PR Kilo-Org/cloud#4325 + Kilo-Org/kilocode#11835). Inference still runs in this container against the provider's `baseURL`; the dashboard is only a remote view/control surface. So a session started from the Agent Dock UI can be resumed from the Cloud Dashboard or mobile app, and the user can switch models from any of those surfaces.
+**Cloud Dashboard visibility.** Every provider declared in `kilo.jsonc` — including custom OpenAI-compatible ones with a `baseURL` — is relayed to the Kilo Cloud Dashboard's model picker for `/remote` sessions via the `list_models` protocol (kilo 7.4.2, PR Kilo-Org/cloud#4325 + Kilo-Org/kilocode#11835). NOTE: 7.4.2 is currently published only as the `rc` dist-tag; `npm install -g @kilocode/cli` (unpinned) pulls the older stable `7.4.1`, which predates the cloud model-picker fix. The Dockerfile pins `@kilocode/cli@7.4.2` for this reason. Inference still runs in this container against the provider's `baseURL`; the dashboard is only a remote view/control surface. So a session started from the Agent Dock UI can be resumed from the Cloud Dashboard or mobile app, and the user can switch models from any of those surfaces.
 
 ### Adding rules
 

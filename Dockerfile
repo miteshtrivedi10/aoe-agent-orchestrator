@@ -13,7 +13,7 @@ ENV PYTHON=/usr/bin/python3
 # the agent to route shell commands through `rtk`.
 RUN RTK_INSTALL_DIR=/usr/local/bin sh -c 'curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh'
 
-RUN npm install -g @kilocode/cli github-mcp-server --no-optional \
+RUN npm install -g @kilocode/cli@7.4.2 github-mcp-server --no-optional \
     && npm cache clean --force \
     && find /usr/local/lib/node_modules \( -name '*.md' -o -name '*.ts' -o -name '*.map' -o -name '*.flow' -o -name '*.tsbuildinfo' -o -name 'binding.gyp' -o -name 'Makefile' -o -name 'makefile' -o -name '*.mk' \) -delete \
     && find /usr/local/lib/node_modules \( -name 'test' -o -name 'tests' -o -name '__tests__' -o -name 'spec' -o -name 'specs' -o -name 'docs' -o -name 'doc' -o -name 'examples' -o -name 'example' -o -name 'benchmark' -o -name 'benchmarks' -o -name 'fixtures' -o -name '.cache' \) -type d -exec rm -rf {} + 2>/dev/null || true \
