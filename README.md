@@ -41,8 +41,12 @@ All configuration is passed via environment variables. You can pass each key ind
 | `CONTEXT7_API_KEY` | optional | API key for the Context7 MCP server. Enables the agent to query live library documentation during sessions. |
 | `OPENROUTER_API_KEY` | optional | OpenRouter provider key. Grants access to additional models (Claude, GPT-4, etc.) through OpenRouter's API. |
 | `OPENCODE_API_KEY` | optional | OpenCode provider key (zen/v1 endpoint). Auto-activates kilo's native `opencode` provider. |
+| `IAMHC_API_KEY` | optional | IAMHC OpenAI-compatible provider key. Grants access to GLM, MiniMax, Kimi, and DeepSeek models via `https://api.iamhc.cn/v1` (declared in `kilo.jsonc`). |
 | `GEMINI_API_KEY` | optional | Google Gemini key. Used for embedding-based code indexing. |
 | `JINA_API_KEY` | optional | Jina openai-compatible embedding provider for indexing. |
+| `KILO_AUTH_TOKEN` | optional | Alternative to `KILO_API_KEY` for Kilo Cloud auth. Written to `auth.json` as an API-type key on boot if `KILO_API_KEY` is absent. |
+| `AGENT_DOCK_INITIAL_PROMPT` | optional | Overrides the prompt auto-submitted when a session starts or resumes. Defaults to `based on readme explain project in 2 lines`. |
+| `AGENT_DOCK_RATE_LIMIT` | optional | Set to `off` to disable per-IP rate limiting (test mode only). Any other value keeps the limits on. |
 
 ### Example: individual flags
 
@@ -91,7 +95,7 @@ Expose port `7860` and pass your secrets as environment variables. For productio
 
 **Why Kilo CLI:** Kilo was chosen because it already ships with a Cloud Dashboard (`app.kilo.ai/cloud`) and a mobile app. When Agent Dock starts a session with `KILO_REMOTE=1`, that session is immediately visible on both the dashboard and the mobile app. This means a single session can be operated from three interfaces — the Agent Dock UI, the Cloud Dashboard, and the mobile app — without any additional setup. Pause on your laptop, resume from your phone, review logs on the dashboard. The session state is synced through Kilo's WebSocket relay to `ingest.kilosessions.ai`, so all three surfaces see the same conversation and file changes in real time.
 
-**Providers:** Kilo (default), OpenRouter, OpenCode, Gemini, Jina embeddings.
+**Providers:** Kilo (default), OpenRouter, IAMHC (GLM/MiniMax/Kimi/DeepSeek via an OpenAI-compatible endpoint), OpenCode (auto-activated), Gemini and Jina for embeddings.
 
 **MCP servers:** Context7 (live library docs), GitHub (PRs/issues, code search).
 
@@ -111,7 +115,7 @@ All endpoints under `/api/*` require `Authorization: Bearer <AGENT_DOCK_API_TOKE
 | `POST` | `/api/repos/:workDirId/pause` | Terminates the PTY but preserves `kilo_session_id`. Does not touch the cloud. Bucket transitions `running → paused`. |
 | `POST` | `/api/repos/:workDirId/kill` | Terminates the PTY, calls `kilo session delete <id>` (best-effort), marks the bucket as `killed`. Preserves the work directory. |
 | `DELETE` | `/api/repos/:workDirId` | Kill + `rm -rf` the work directory + removes the registry entry. The repo can be re-checked out fresh afterwards. |
-| `POST` | `/api/repos/:workDirId/continue` | Sends a prompt to the live PTY. Requires the bucket to be `running` with a known `kilo_session_id`. |
+| `POST` | `/api/repos/:workDirId/continue` | Headless one-shot `kilo run --session <id> --cloud-fork --share` against the bucket's cloud session id (no TUI). Requires a known `kilo_session_id` and the bucket to be **not** `running` (returns `409` if already running). No UI button — for external callers. |
 
 ### Other
 
@@ -120,8 +124,9 @@ All endpoints under `/api/*` require `Authorization: Bearer <AGENT_DOCK_API_TOKE
 | `GET` | `/` | The HTML UI (served without auth so the browser can render the shell). |
 | `GET` | `/health` | Plain `200 ok` — useful for container health checks. |
 | `GET` | `/api/status` | Boot diagnostics: `kilo_version`, `kilo_which`, `repo_count`, `default_model`, rate-limit status. No auth required. |
-| `GET` | `/api/logs` | In-memory ring-buffer tail (latest N lines). |
-| `GET` | `/api/logs/kilo-internal` | kilo's own log files (under `/data/kilo/log/*.log`). |
+| `GET`  | `/api/logs` | In-memory ring-buffer tail (latest N lines). |
+| `GET`  | `/api/logs/session/:id` | Per-PTY kilo log for the bucket whose `work_dir_identifier` is `:id` (under `/data/kilo/session-<id>.log`), ANSI-stripped, last 200 lines. |
+| `GET`  | `/api/logs/kilo-internal` | kilo's own log files (under `/data/kilo/log/*.log`). |
 | `GET` | `/api/relay-check` | Verifies the per-PTY cloud-relay chain — `auth.json`, `api.kilo.ai`, `ingest.kilosessions.ai`, `kilo.json` config — is healthy. |
 | `GET` | `/api/diagnostics` | Server-side diagnostic dump (kilo bin path, version, auth validity). |
 | `POST` | `/api/auth/login` | Starts the device-auth flow. Returns `{ status: "pending", url, code }` — the URL and code the user must open in a browser. |
@@ -193,6 +198,10 @@ rules/
 ```
 
 Rules are copied into each session's `.kilo/rules/` directory at checkout. The agent reads them as system-level instructions.
+
+### Skills (Superpowers)
+
+Agent Dock ships the always-available [Superpowers](https://github.com/obra/superpowers) skills, downloaded at Docker build time (see `Dockerfile`) from `obra/superpowers`. They are copied into each session's `.kilo/skills/` directory at checkout, so Kilo auto-discovers them (it scans `.kilo/skills/<name>/SKILL.md`) and the Superpowers methodology — brainstorming, writing-plans, test-driven-development, verification-before-completion, etc. — is available in every session. No per-session setup is required; the skills are read-only in the image and a fresh copy is made per work directory.
 
 ### Adding tools or extensions
 
