@@ -99,54 +99,6 @@ Expose port `7860` and pass your secrets as environment variables. For productio
 
 **MCP servers:** Context7 (live library docs), GitHub (PRs/issues, code search).
 
-## REST API
-
-All endpoints under `/api/*` require `Authorization: Bearer <AGENT_DOCK_API_TOKEN>` except `/api/status`. Write endpoints (POST/DELETE) are rate-limited per IP.
-
-### Bucket lifecycle
-
-| Method | Path | Notes |
-|---|---|---|
-| `POST` | `/api/repos/checkout` | Body: `{ repo_url, branch? }`. Clones the repo, starts a kilo session, registers a new bucket. Returns `201` with the new bucket, or `409` if a bucket for the same repo already exists (`error: "already checked out"`), a different repo URL collides on the same basename (`error: "bucket collision"`), or auth is invalid (`{ auth_invalid: true }`). |
-| `GET`  | `/api/repos` | Returns the bucket registry as a JSON array. Each entry includes `work_dir_identifier`, `repo_url`, `repo_name`, `branch`, `cloud_session_status`, `session_state` (`running` / `paused` / `stopped` / `killed`), `started_at`. |
-| `GET`  | `/api/repos/:workDirId` | Single-bucket detail. Returns `404` if not found. |
-| `POST` | `/api/repos/:workDirId/start` | Smart resume. If the cloud session is alive, resumes the existing PTY (`resumed_live: true`). If the cloud session is gone, returns `409 { needs_new_session: true, reason }` and the UI opens a confirmation dialog. Other `409`s: `auth_invalid`, `already running`. |
-| `POST` | `/api/repos/:workDirId/new-session` | Starts a fresh kilo cloud session in the existing work directory. Used after `start` returns `needs_new_session: true`. File changes are preserved. |
-| `POST` | `/api/repos/:workDirId/pause` | Terminates the PTY but preserves `kilo_session_id`. Does not touch the cloud. Bucket transitions `running → paused`. |
-| `POST` | `/api/repos/:workDirId/kill` | Terminates the PTY, calls `kilo session delete <id>` (best-effort), marks the bucket as `killed`. Preserves the work directory. |
-| `DELETE` | `/api/repos/:workDirId` | Kill + `rm -rf` the work directory + removes the registry entry. The repo can be re-checked out fresh afterwards. |
-| `POST` | `/api/repos/:workDirId/continue` | Headless one-shot `kilo run --session <id> --cloud-fork --share` against the bucket's cloud session id (no TUI). Requires a known `kilo_session_id` and the bucket to be **not** `running` (returns `409` if already running). No UI button — for external callers. |
-
-### Other
-
-| Method | Path | Notes |
-|---|---|---|
-| `GET` | `/` | The HTML UI (served without auth so the browser can render the shell). |
-| `GET` | `/health` | Plain `200 ok` — useful for container health checks. |
-| `GET` | `/api/status` | Boot diagnostics: `kilo_version`, `kilo_which`, `repo_count`, `default_model`, rate-limit status. No auth required. |
-| `GET`  | `/api/logs` | In-memory ring-buffer tail (latest N lines). |
-| `GET`  | `/api/logs/session/:id` | Per-PTY kilo log for the bucket whose `work_dir_identifier` is `:id` (under `/data/kilo/session-<id>.log`), ANSI-stripped, last 200 lines. |
-| `GET`  | `/api/logs/kilo-internal` | kilo's own log files (under `/data/kilo/log/*.log`). |
-| `GET` | `/api/relay-check` | Verifies the per-PTY cloud-relay chain — `auth.json`, `api.kilo.ai`, `ingest.kilosessions.ai`, `kilo.json` config — is healthy. |
-| `GET` | `/api/diagnostics` | Server-side diagnostic dump (kilo bin path, version, auth validity). |
-| `POST` | `/api/auth/login` | Starts the device-auth flow. Returns `{ status: "pending", url, code }` — the URL and code the user must open in a browser. |
-| `GET` | `/api/auth/status` | Polls device-auth progress. Returns `{ status: "idle" | "pending" | "success" | "failed" | "cancelled" }`. |
-| `POST` | `/api/auth/cancel` | Cancels an in-flight device-auth flow. |
-
-### State machine
-
-```
-running  ──pause──▶  paused
-running  ──kill───▶  killed
-running  ──PTY dies─▶  stopped   (via updateStatus() on next poll)
-paused   ──start──▶  running    (smart resume)
-stopped  ──start──▶  running    (smart resume)
-killed   ──start──▶  running    (fresh /new-session — no cloud session on record)
-any      ──delete─▶  (registry entry + work dir removed)
-```
-
-`cloud_session_status` is `unknown` by default and is only refreshed after Start/Resume attempts (`active` when the cloud session is reachable, `deleted` after a Resume reports `importFailed`).
-
 ## Configuring MCP servers, providers, rules, and tools
 
 Agent Dock delegates all agent configuration to Kilo's config system. The main config file is `kilo.jsonc` in the working directory of each session.
@@ -280,3 +232,51 @@ No separate `kilo daemon` or `kilo remote` processes. Each PTY session with `KIL
 3. The initial prompt is sent. Kilo calls the configured model provider (Kilo backend, OpenRouter, etc.) and MCP servers as needed.
 4. User can pause (terminates PTY, preserves cloud session id), start (smart-resumes the cloud session, or prompts for a fresh one if it's gone), or kill (terminates PTY + `kilo session delete`, preserves work dir) from the Repo List. The row-level busy lock keeps the buttons disabled and shows a "Working: …" label until the next poll confirms the new state.
 5. Logs are streamed to the ring buffer and viewable in the Agent Dock UI's Logs tab.
+
+## REST API
+
+All endpoints under `/api/*` require `Authorization: Bearer <AGENT_DOCK_API_TOKEN>` except `/api/status`. Write endpoints (POST/DELETE) are rate-limited per IP.
+
+### Bucket lifecycle
+
+| Method | Path | Notes |
+|---|---|---|
+| `POST` | `/api/repos/checkout` | Body: `{ repo_url, branch? }`. Clones the repo, starts a kilo session, registers a new bucket. Returns `201` with the new bucket, or `409` if a bucket for the same repo already exists (`error: "already checked out"`), a different repo URL collides on the same basename (`error: "bucket collision"`), or auth is invalid (`{ auth_invalid: true }`). |
+| `GET`  | `/api/repos` | Returns the bucket registry as a JSON array. Each entry includes `work_dir_identifier`, `repo_url`, `repo_name`, `branch`, `cloud_session_status`, `session_state` (`running` / `paused` / `stopped` / `killed`), `started_at`. |
+| `GET`  | `/api/repos/:workDirId` | Single-bucket detail. Returns `404` if not found. |
+| `POST` | `/api/repos/:workDirId/start` | Smart resume. If the cloud session is alive, resumes the existing PTY (`resumed_live: true`). If the cloud session is gone, returns `409 { needs_new_session: true, reason }` and the UI opens a confirmation dialog. Other `409`s: `auth_invalid`, `already running`. |
+| `POST` | `/api/repos/:workDirId/new-session` | Starts a fresh kilo cloud session in the existing work directory. Used after `start` returns `needs_new_session: true`. File changes are preserved. |
+| `POST` | `/api/repos/:workDirId/pause` | Terminates the PTY but preserves `kilo_session_id`. Does not touch the cloud. Bucket transitions `running → paused`. |
+| `POST` | `/api/repos/:workDirId/kill` | Terminates the PTY, calls `kilo session delete <id>` (best-effort), marks the bucket as `killed`. Preserves the work directory. |
+| `DELETE` | `/api/repos/:workDirId` | Kill + `rm -rf` the work directory + removes the registry entry. The repo can be re-checked out fresh afterwards. |
+| `POST` | `/api/repos/:workDirId/continue` | Headless one-shot `kilo run --session <id> --cloud-fork --share` against the bucket's cloud session id (no TUI). Requires a known `kilo_session_id` and the bucket to be **not** `running` (returns `409` if already running). No UI button — for external callers. |
+
+### Other
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/` | The HTML UI (served without auth so the browser can render the shell). |
+| `GET` | `/health` | Plain `200 ok` — useful for container health checks. |
+| `GET` | `/api/status` | Boot diagnostics: `kilo_version`, `kilo_which`, `repo_count`, `default_model`, rate-limit status. No auth required. |
+| `GET`  | `/api/logs` | In-memory ring-buffer tail (latest N lines). |
+| `GET`  | `/api/logs/session/:id` | Per-PTY kilo log for the bucket whose `work_dir_identifier` is `:id` (under `/data/kilo/session-<id>.log`), ANSI-stripped, last 200 lines. |
+| `GET`  | `/api/logs/kilo-internal` | kilo's own log files (under `/data/kilo/log/*.log`). |
+| `GET` | `/api/relay-check` | Verifies the per-PTY cloud-relay chain — `auth.json`, `api.kilo.ai`, `ingest.kilosessions.ai`, `kilo.json` config — is healthy. |
+| `GET` | `/api/diagnostics` | Server-side diagnostic dump (kilo bin path, version, auth validity). |
+| `POST` | `/api/auth/login` | Starts the device-auth flow. Returns `{ status: "pending", url, code }` — the URL and code the user must open in a browser. |
+| `GET` | `/api/auth/status` | Polls device-auth progress. Returns `{ status: "idle" | "pending" | "success" | "failed" | "cancelled" }`. |
+| `POST` | `/api/auth/cancel` | Cancels an in-flight device-auth flow. |
+
+### State machine
+
+```
+running  ──pause──▶  paused
+running  ──kill───▶  killed
+running  ──PTY dies─▶  stopped   (via updateStatus() on next poll)
+paused   ──start──▶  running    (smart resume)
+stopped  ──start──▶  running    (smart resume)
+killed   ──start──▶  running    (fresh /new-session — no cloud session on record)
+any      ──delete─▶  (registry entry + work dir removed)
+```
+
+`cloud_session_status` is `unknown` by default and is only refreshed after Start/Resume attempts (`active` when the cloud session is reachable, `deleted` after a Resume reports `importFailed`).
