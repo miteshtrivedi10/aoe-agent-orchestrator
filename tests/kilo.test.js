@@ -78,6 +78,100 @@ describe("kilo", () => {
     });
   });
 
+  describe("writeProjectConfig — stale .kilo/kilo.json cleanup", () => {
+    it("removes stale .kilo/kilo.json DIRECTORY before writing kilo.jsonc (HF persistent storage leaves crud)", () => {
+      // Simulate a stale kilo.json/ directory persisted from a previous deploy
+      // (HF persistent storage keeps /data across restarts; kilo's config
+      // loader crashes with EISDIR on .kilo/kilo.json if it's a directory).
+      const workDir = fs.mkdtempSync("/tmp/agent-dock-wpc-stale-dir-");
+      const kiloDir = path.join(workDir, ".kilo");
+      fs.mkdirSync(path.join(kiloDir, "kilo.json"), { recursive: true });
+      fs.writeFileSync(path.join(kiloDir, "kilo.json", "crud"), "leftover");
+      // Also drop a stale kilo.json file alongside to verify file removal too.
+      fs.writeFileSync(path.join(kiloDir, "kilo.json5"), "{}");
+
+      // Bypass the real /app/kilo.jsonc template by intercepting readFileSync.
+      const realRead = fs.readFileSync;
+      const readMock = mock.method(fs, "readFileSync", (p, ...rest) => {
+        if (p === "/app/kilo.jsonc") return JSON.stringify({ small_model: "kilo/kilo-auto/free" });
+        return realRead(p, ...rest);
+      });
+      // KILO_API_KEY controls whether the provider block is deleted — set so
+      // writeProjectConfig keeps it (none in our minimal template, no impact).
+      process.env.KILO_API_KEY = "test";
+      try {
+        kilo.writeProjectConfig(workDir, "test-bucket");
+      } finally {
+        delete process.env.KILO_API_KEY;
+        readMock.mock.restore();
+      }
+
+      // kilo.jsonc must exist as a file with the resolved config.
+      const cfgPath = path.join(kiloDir, "kilo.jsonc");
+      assert.ok(fs.existsSync(cfgPath), "kilo.jsonc must be written");
+      const st = fs.statSync(cfgPath);
+      assert.ok(st.isFile(), "kilo.jsonc must be a file, not a directory");
+
+      // The stale kilo.json directory AND kilo.json5 file must both be gone.
+      assert.ok(!fs.existsSync(path.join(kiloDir, "kilo.json")), "stale kilo.json must be removed");
+      assert.ok(!fs.existsSync(path.join(kiloDir, "kilo.json5")), "stale kilo.json5 must be removed");
+
+      try { fs.rmSync(workDir, { recursive: true, force: true }); } catch (_) {}
+    });
+
+    it("leaves unrelated .kilo/ contents (skills, rules) untouched during cleanup", () => {
+      const workDir = fs.mkdtempSync("/tmp/agent-dock-wpc-preserve-");
+      const kiloDir = path.join(workDir, ".kilo");
+      fs.mkdirSync(path.join(kiloDir, "rules"), { recursive: true });
+      fs.writeFileSync(path.join(kiloDir, "rules", "rtk-rules.md"), "rule body");
+      fs.mkdirSync(path.join(kiloDir, "skills", "demo"), { recursive: true });
+      fs.writeFileSync(path.join(kiloDir, "skills", "demo", "SKILL.md"), "skill");
+
+      const realRead = fs.readFileSync;
+      const readMock = mock.method(fs, "readFileSync", (p, ...rest) => {
+        if (p === "/app/kilo.jsonc") return JSON.stringify({ small_model: "kilo/kilo-auto/free" });
+        return realRead(p, ...rest);
+      });
+      process.env.KILO_API_KEY = "test";
+      try {
+        kilo.writeProjectConfig(workDir, "test-bucket-2");
+      } finally {
+        delete process.env.KILO_API_KEY;
+        readMock.mock.restore();
+      }
+
+      assert.ok(fs.existsSync(path.join(kiloDir, "rules", "rtk-rules.md")), "rules/ must survive cleanup");
+      assert.ok(fs.existsSync(path.join(kiloDir, "skills", "demo", "SKILL.md")), "skills/ must survive cleanup");
+      assert.ok(fs.existsSync(path.join(kiloDir, "kilo.jsonc")), "kilo.jsonc must be written");
+
+      try { fs.rmSync(workDir, { recursive: true, force: true }); } catch (_) {}
+    });
+
+    it("writes kilo.jsonc cleanly when no stale files exist (fresh workDir)", () => {
+      const workDir = fs.mkdtempSync("/tmp/agent-dock-wpc-clean-");
+      const realRead = fs.readFileSync;
+      const readMock = mock.method(fs, "readFileSync", (p, ...rest) => {
+        if (p === "/app/kilo.jsonc") return JSON.stringify({ small_model: "kilo/kilo-auto/free" });
+        return realRead(p, ...rest);
+      });
+      process.env.KILO_API_KEY = "test";
+      try {
+        kilo.writeProjectConfig(workDir, "test-bucket-3");
+      } finally {
+        delete process.env.KILO_API_KEY;
+        readMock.mock.restore();
+      }
+
+      const cfgPath = path.join(workDir, ".kilo", "kilo.jsonc");
+      assert.ok(fs.existsSync(cfgPath), "kilo.jsonc must be written");
+      assert.ok(fs.statSync(cfgPath).isFile(), "kilo.jsonc must be a file");
+      const parsed = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+      assert.equal(parsed.small_model, "kilo/kilo-auto/free");
+
+      try { fs.rmSync(workDir, { recursive: true, force: true }); } catch (_) {}
+    });
+  });
+
   describe("scanInternalLogs", () => {
     it("returns default result when log dir missing", () => {
       mock.method(fs, "readdirSync", () => { throw new Error("ENOENT"); });
