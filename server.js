@@ -542,7 +542,14 @@ app.post("/api/repos/:workDirId/continue", authGate, writeLimiter, (req, res) =>
   const logFd = fs.openSync(logFile, "a");
   const child = spawn("kilo", args, {
     cwd: bucket.work_dir,
-    env: { ...process.env, KILO_REMOTE: "1" },
+    env: {
+      ...process.env,
+      KILO_REMOTE: "1",
+      // Permanent snapshot disable — see lib/kilo.js startKiloSession for
+      // full rationale. KILO_CONFIG_CONTENT has highest config priority and
+      // overrides all config files, so "Initializing snapshot…" never fires.
+      KILO_CONFIG_CONTENT: JSON.stringify({ snapshot: false }),
+    },
     stdio: ["ignore", logFd, logFd],
     detached: true,
   });

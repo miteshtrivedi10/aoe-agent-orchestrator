@@ -27,6 +27,17 @@ RUN npm install --omit=dev --no-optional \
     && find node_modules \( -name 'test' -o -name 'tests' -o -name '__tests__' -o -name 'spec' -o -name 'docs' -o -name 'examples' -o -name 'benchmark' -o -name 'benchmarks' -o -name 'fixtures' -o -name '.cache' \) -type d -exec rm -rf {} + 2>/dev/null || true \
     && find node_modules -name 'prebuilds' -type d -exec sh -c 'for d in "$@"; do for p in "$d"/*/; do case "$(basename "$p")" in linux*|linux-x64|linux-x86_64) ;; *) rm -rf "$p";; esac; done; done' _ {} + 2>/dev/null || true
 
+# Download Superpowers skills (obra/superpowers) from upstream at build time.
+# Previously these were pre-bundled in the repo under superpowers/ — now we fetch
+# the latest from the main branch so skills stay current without repo updates.
+# The skills land at /app/superpowers and are copied into each session's
+# .kilo/skills/ at spawn time (see lib/kilo.js SKILLS_DIR).
+RUN mkdir -p /tmp/sp /app/superpowers \
+    && curl -fsSL https://github.com/obra/superpowers/archive/refs/heads/main.tar.gz \
+       | tar xz -C /tmp/sp --strip-components=1 \
+    && cp -r /tmp/sp/skills/. /app/superpowers/ \
+    && rm -rf /tmp/sp
+
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -55,7 +66,7 @@ COPY templates/ /app/templates/
 COPY entrypoint.sh /app/entrypoint.sh
 COPY kilo.jsonc /app/kilo.jsonc
 COPY rules/ /app/rules/
-COPY superpowers/ /app/superpowers/
+COPY --from=builder /app/superpowers /app/superpowers
 
 RUN chmod +x /app/entrypoint.sh
 
