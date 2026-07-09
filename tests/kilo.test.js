@@ -310,6 +310,118 @@ describe("kilo", () => {
     });
   });
 
+  describe("consolidateKiloLogs", () => {
+    it("merges datetime-named files for the same day into one date file", () => {
+      const files = {
+        "2026-07-09T08-12-38.log": "line1\n",
+        "2026-07-09T09-15-00.log": "line2\n",
+        "2026-07-10T10-00-00.log": "line3\n",
+        "2026-07-09.log": "existing\n",  // already date-only, should be untouched
+      };
+      const mtimes = {};
+      for (const f of Object.keys(files)) mtimes[f] = Date.now() - 120000; // 2min ago, past STALE_MS
+      const written = {};
+      let openTarget = null;
+      mock.method(fs, "readdirSync", () => Object.keys(files));
+      mock.method(fs, "statSync", (p) => {
+        const name = path.basename(p);
+        return { mtimeMs: mtimes[name] || Date.now() };
+      });
+      mock.method(fs, "readFileSync", (p) => {
+        const name = path.basename(p);
+        return files[name] || "";
+      });
+      mock.method(fs, "openSync", (p) => {
+        openTarget = path.basename(p);
+        return 42;
+      });
+      mock.method(fs, "writeSync", (_fd, content) => {
+        written[openTarget] = (written[openTarget] || "") + content;
+      });
+      const unlinked = [];
+      mock.method(fs, "unlinkSync", (p) => { unlinked.push(path.basename(p)); });
+      mock.method(fs, "closeSync", () => {});
+
+      kilo.consolidateKiloLogs();
+
+      // 2026-07-09.log should have line1 + line2 appended (existing content stays in the file;
+      // our mock doesn't preserve "existing\n" because openSync uses append mode but the mock
+      // starts written[] empty — that's fine, we only verify merge behavior).
+      assert.ok(written["2026-07-09.log"], "should write to 2026-07-09.log");
+      assert.ok(written["2026-07-09.log"].includes("line1"), "should contain line1");
+      assert.ok(written["2026-07-09.log"].includes("line2"), "should contain line2");
+      assert.ok(written["2026-07-10.log"], "should write to 2026-07-10.log");
+      assert.ok(written["2026-07-10.log"].includes("line3"), "should contain line3");
+      // Datetime files should be unlinked; date-only file should NOT be unlinked.
+      assert.ok(unlinked.includes("2026-07-09T08-12-38.log"), "should unlink first datetime file");
+      assert.ok(unlinked.includes("2026-07-09T09-15-00.log"), "should unlink second datetime file");
+      assert.ok(unlinked.includes("2026-07-10T10-00-00.log"), "should unlink third datetime file");
+      assert.ok(!unlinked.includes("2026-07-09.log"), "should NOT unlink already-date-only file");
+      mock.restoreAll();
+    });
+
+    it("skips files modified within STALE_MS (being actively written)", () => {
+      const files = {
+        "2026-07-09T08-12-38.log": "recent\n",       // mtime = now (active)
+        "2026-07-09T09-15-00.log": "old\n",          // mtime = 2min ago (stale)
+      };
+      mock.method(fs, "readdirSync", () => Object.keys(files));
+      mock.method(fs, "statSync", (p) => {
+        const name = path.basename(p);
+        const mtime = name === "2026-07-09T08-12-38.log" ? Date.now() : Date.now() - 120000;
+        return { mtimeMs: mtime };
+      });
+      const written = {};
+      let openTarget = null;
+      mock.method(fs, "openSync", (p) => { openTarget = path.basename(p); return 1; });
+      mock.method(fs, "writeSync", (_fd, c) => { written[openTarget] = (written[openTarget] || "") + c; });
+      const unlinked = [];
+      mock.method(fs, "unlinkSync", (p) => { unlinked.push(path.basename(p)); });
+      mock.method(fs, "readFileSync", (p) => {
+        const name = path.basename(p);
+        return files[name] || "";
+      });
+      mock.method(fs, "closeSync", () => {});
+
+      kilo.consolidateKiloLogs();
+
+      // Only the stale file should be consolidated; the active one skipped.
+      assert.ok(written["2026-07-09.log"], "should write to date file");
+      assert.ok(written["2026-07-09.log"].includes("old"), "should contain stale file content");
+      assert.ok(!written["2026-07-09.log"].includes("recent"), "should NOT contain active file content");
+      assert.ok(unlinked.includes("2026-07-09T09-15-00.log"), "should unlink stale file");
+      assert.ok(!unlinked.includes("2026-07-09T08-12-38.log"), "should NOT unlink active file");
+      mock.restoreAll();
+    });
+
+    it("does nothing when log dir missing", () => {
+      mock.method(fs, "readdirSync", () => { throw new Error("ENOENT"); });
+      // Should not throw
+      kilo.consolidateKiloLogs();
+      mock.restoreAll();
+    });
+  });
+
+  describe("detectCloudValidationFailure", () => {
+    it("detects '4 of 6 requests failed' pattern", () => {
+      const buf = "Error: 4 of 6 requests failed: Unexpected server error. Check server logs for details.";
+      assert.equal(kilo.detectCloudValidationFailure(buf), true);
+    });
+    it("detects 'Affected startup requests' pattern", () => {
+      const buf = "Affected startup requests: config.providers, provider.list, app.agents, config.get";
+      assert.equal(kilo.detectCloudValidationFailure(buf), true);
+    });
+    it("detects 'Unexpected server error' pattern", () => {
+      const buf = "Some prefix Unexpected server error trailing text";
+      assert.equal(kilo.detectCloudValidationFailure(buf), true);
+    });
+    it("does NOT match unrelated errors", () => {
+      assert.equal(kilo.detectCloudValidationFailure("authentication failed"), false);
+      assert.equal(kilo.detectCloudValidationFailure("session created successfully"), false);
+      assert.equal(kilo.detectCloudValidationFailure("Failed to import session from cloud"), false);
+    });
+  });
+
   describe("sendPromptToLive", () => {
     it("returns false when no PTY registered", () => {
       assert.equal(kilo.sendPromptToLive("nonexistent", "hello"), false);
