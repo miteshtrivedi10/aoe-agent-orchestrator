@@ -41,7 +41,7 @@ RUN mkdir -p /tmp/sp /app/superpowers \
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git ca-certificates ripgrep \
+    git ca-certificates ripgrep xz-utils \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -67,8 +67,9 @@ COPY entrypoint.sh /app/entrypoint.sh
 COPY kilo.jsonc /app/kilo.jsonc
 COPY rules/ /app/rules/
 COPY --from=builder /app/superpowers /app/superpowers
+COPY scripts/install-runtimes.sh /app/scripts/install-runtimes.sh
 
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh /app/scripts/install-runtimes.sh
 
 EXPOSE 7860
 ENTRYPOINT ["/app/entrypoint.sh"]

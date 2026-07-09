@@ -2,7 +2,15 @@
 set -euo pipefail
 
 # Session data is persisted via mounted volume at /data
-mkdir -p /data/kilo /data/repos
+mkdir -p /data/kilo /data/repos /data/installs
+
+# ── Runtime tool PATH ───────────────────────────────────────
+# Pre-installs (Python 3.12/3.14, OpenJDK 21, Node 22+) are downloaded
+# once into /data/installs/<tool>/<version> at container boot. Prepend their
+# bin dirs so the Node server AND every spawned Kilo PTY session can find
+# them. Dir.s that don't exist yet (first boot, install still running) are
+# simply skipped by the shell — harmless until the binaries land.
+export PATH="/data/installs/node/22/bin:/data/installs/python/3.14/bin:/data/installs/python/3.12/bin:/data/installs/java/21/bin:$PATH"
 
 # Git safe.directory — /data is HF persistent storage, may have mismatched UID
 git config --global safe.directory '*'
