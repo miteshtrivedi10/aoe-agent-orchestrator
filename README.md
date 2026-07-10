@@ -168,7 +168,7 @@ Kilo supports tool extensions via MCP servers (see above) and built-in tool conf
 }
 ```
 
-Tool permissions are evaluated per-session. The `rules/` directory is the recommended place for project-specific restrictions (e.g., banning `git push`, blocking NSE URLs).
+Tool permissions are evaluated per-session. The `rules/` directory is the recommended place for project-specific restrictions (e.g., banning `git push`).
 
 ## Architecture
 
