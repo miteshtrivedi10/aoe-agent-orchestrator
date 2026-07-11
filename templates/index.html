@@ -584,6 +584,9 @@ tr.row-error {
     <button type="button" class="nav-item" data-target="diagnostics" onclick="navigateTo('diagnostics')">
       <span class="nav-icon">◈</span> Diagnostics
     </button>
+    <button type="button" class="nav-item" data-target="metrics" onclick="navigateTo('metrics')">
+      <span class="nav-icon">📊</span> Metrics
+    </button>
     <button type="button" class="nav-item" data-target="logs" onclick="navigateTo('logs')">
       <span class="nav-icon">≡</span> Logs
     </button>
@@ -667,6 +670,18 @@ tr.row-error {
       <div class="card">
         <div id="diagPanel">
           <div class="empty">Loading diagnostics…</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="metrics">
+      <div class="section-header">
+        <h2>Machine Metrics</h2>
+        <p>CPU, memory, disk, and load — refreshed every 30 seconds.</p>
+      </div>
+      <div class="card">
+        <div id="metricsPanel">
+          <div class="empty">Loading metrics…</div>
         </div>
       </div>
     </section>
@@ -759,7 +774,7 @@ function navigateTo(targetId, pushState) {
 
 function handleHash() {
   const hash = window.location.hash.replace('#', '') || 'new-session';
-  const valid = ['new-session', 'repos', 'diagnostics', 'logs', 'auth'];
+  const valid = ['new-session', 'repos', 'diagnostics', 'metrics', 'logs', 'auth'];
   navigateTo(valid.indexOf(hash) !== -1 ? hash : 'new-session', false);
 }
 
@@ -1203,6 +1218,76 @@ async function loadDiag() {
   }
 }
 
+function fmtBytes(b) {
+  if (b == null || isNaN(b)) return '—';
+  if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' GiB';
+  if (b >= 1048576)    return (b / 1048576).toFixed(1)    + ' MiB';
+  if (b >= 1024)       return (b / 1024).toFixed(1)       + ' KiB';
+  return b + ' B';
+}
+
+function fmtUptime(s) {
+  if (s == null || isNaN(s)) return '—';
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const parts = [];
+  if (d) parts.push(d + 'd');
+  if (h) parts.push(h + 'h');
+  if (m) parts.push(m + 'm');
+  return parts.join(' ') || '<1m';
+}
+
+async function loadMetrics() {
+  try {
+    const res = await fetch('/api/metrics', { headers: authHeaders() });
+    const d = await res.json();
+    let html = '<table style="width:100%"><tbody>';
+
+    // CPU
+    html += '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0;font-weight:600">CPU</td><td style="padding:0.2rem 0"></td></tr>';
+    html += row('cpu_percent', (d.cpu_percent != null ? d.cpu_percent + '%' : '—') + ' (' + (d.cpu_cores || '?') + ' cores)');
+    html += row('load_1m / 5m / 15m', d.load_1m != null ? d.load_1m + ' / ' + d.load_5m + ' / ' + d.load_15m : '—');
+
+    // Memory
+    html += '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0;font-weight:600">Memory</td><td style="padding:0.2rem 0"></td></tr>';
+    html += row('mem_total', fmtBytes(d.mem_total));
+    html += row('mem_used / percent', fmtBytes(d.mem_used) + ' / ' + (d.mem_percent != null ? d.mem_percent + '%' : '—'));
+    html += row('mem_available', fmtBytes(d.mem_available));
+    html += row('swap', fmtBytes(d.swap_total) + ' total / ' + fmtBytes(d.swap_free) + ' free');
+
+    // Disk
+    html += '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0;font-weight:600">Disk (/data)</td><td style="padding:0.2rem 0"></td></tr>';
+    html += row('disk_total', fmtBytes(d.disk_total));
+    html += row('disk_used / percent', fmtBytes(d.disk_used) + ' / ' + (d.disk_percent != null ? d.disk_percent + '%' : '—'));
+    html += row('disk_available', fmtBytes(d.disk_available));
+
+    // System
+    html += '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0;font-weight:600">System</td><td style="padding:0.2rem 0"></td></tr>';
+    html += row('uptime', fmtUptime(d.uptime_seconds));
+
+    // Color-code disk percent
+    if (d.disk_percent != null) {
+      const color = d.disk_percent > 90 ? 'color:#ef4444;font-weight:600' : d.disk_percent > 75 ? 'color:#f59e0b' : '';
+      html += row('disk_percent', '<span style="' + color + '">' + d.disk_percent + '%</span>');
+    }
+    if (d.mem_percent != null) {
+      const color = d.mem_percent > 90 ? 'color:#ef4444;font-weight:600' : d.mem_percent > 75 ? 'color:#f59e0b' : '';
+      html += row('mem_percent', '<span style="' + color + '">' + d.mem_percent + '%</span>');
+    }
+
+    html += '</tbody></table>';
+    html += '<p style="color:var(--text-muted);font-size:0.75rem;margin-top:0.5rem">Last updated: ' + new Date(d.timestamp).toLocaleTimeString() + '</p>';
+    document.getElementById('metricsPanel').innerHTML = html;
+  } catch(e) {
+    document.getElementById('metricsPanel').innerHTML = '<div class="empty">Error loading metrics: ' + esc(e.message) + '</div>';
+  }
+
+  function row(k, v) {
+    return '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0">' + k + '</td><td style="padding:0.2rem 0">' + esc(String(v)) + '</td></tr>';
+  }
+}
+
 async function loadLogs() {
   try {
     const res = await fetch('/api/logs?n=100', { headers: authHeaders() });
@@ -1327,10 +1412,12 @@ window.addEventListener('popstate', handleHash);
 
 loadRepos();
 loadDiag();
+loadMetrics();
 loadLogs();
 checkAuth();
 setInterval(loadRepos, 3000); // Poll repo buckets every 3 seconds
 setInterval(loadDiag, 5000);   // Poll diagnostics every 5 seconds
+setInterval(loadMetrics, 30000); // Poll metrics every 30 seconds
 setInterval(loadLogs, 5000);   // Poll logs every 5 seconds
 document.getElementById('logPanel').addEventListener('scroll', function() {
   this._userScrolled = this.scrollTop > 30;

@@ -1,6 +1,7 @@
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { spawn, execFileSync } = require("child_process");
 
 const { log, logPrefix, LOG_RING, stripAnsi } = require("./lib/logger");
@@ -236,6 +237,99 @@ app.get("/api/diagnostics", authGate, readLimiter, async (_req, res) => {
     diag.internal_log_scan = scanInternalLogs(0);
   } catch (e) { diag.internal_log_scan_error = e.message; }
   res.json(diag);
+});
+
+// ── Metrics endpoint — reads /proc and os for live system stats ─────
+
+let prevCpu = null;
+
+function readProcStat() {
+  const raw = fs.readFileSync("/proc/stat", "utf8").split("\n");
+  for (const line of raw) {
+    const fields = line.trim().split(/\s+/);
+    if (fields[0] === "cpu") {
+      return fields.slice(1).map(Number);
+    }
+  }
+  return null;
+}
+
+function cpuPercent() {
+  const cur = readProcStat();
+  if (!cur) return 0;
+  if (!prevCpu) { prevCpu = cur; return 0; }
+  const prevIdle = prevCpu[3] + (prevCpu[4] || 0);
+  const curIdle = cur[3] + (cur[4] || 0);
+  const prevTotal = prevCpu.reduce((a, b) => a + b, 0);
+  const curTotal = cur.reduce((a, b) => a + b, 0);
+  const totalDelta = curTotal - prevTotal;
+  const idleDelta = curIdle - prevIdle;
+  prevCpu = cur;
+  if (totalDelta <= 0) return 0;
+  return Math.round(((totalDelta - idleDelta) / totalDelta) * 100 * 10) / 10;
+}
+
+function readProcMeminfo() {
+  const raw = fs.readFileSync("/proc/meminfo", "utf8").split("\n");
+  const m = {};
+  for (const line of raw) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      m[parts[0].replace(":", "")] = parseInt(parts[1], 10) * 1024;
+    }
+  }
+  return m;
+}
+
+app.get("/api/metrics", authGate, readLimiter, async (_req, res) => {
+  const metrics = { timestamp: Date.now() };
+
+  // CPU
+  metrics.cpu_percent = cpuPercent();
+  metrics.cpu_cores = os.cpus().length;
+
+  // Load
+  try {
+    const loadRaw = fs.readFileSync("/proc/loadavg", "utf8").trim().split(/\s+/);
+    metrics.load_1m  = parseFloat(loadRaw[0]) || null;
+    metrics.load_5m  = parseFloat(loadRaw[1]) || null;
+    metrics.load_15m = parseFloat(loadRaw[2]) || null;
+  } catch (_) {}
+
+  // Memory
+  try {
+    const mem = readProcMeminfo();
+    const total = mem.MemTotal || 0;
+    const available = mem.MemAvailable || 0;
+    metrics.mem_total     = total;
+    metrics.mem_available = available;
+    metrics.mem_used      = total - available;
+    metrics.mem_percent   = total ? Math.round(((total - available) / total) * 100 * 10) / 10 : 0;
+    metrics.swap_total    = mem.SwapTotal || 0;
+    metrics.swap_free     = mem.SwapFree || 0;
+  } catch (_) {}
+
+  // Uptime
+  try {
+    const up = fs.readFileSync("/proc/uptime", "utf8").trim().split(/\s+/)[0];
+    metrics.uptime_seconds = parseFloat(up) || null;
+  } catch (_) {}
+
+  // Disk (read-only shell call — no state mutation)
+  try {
+    const df = execFileSync("df", ["-B1", "--output=size,avail,used,pcent", "/data"], {
+      encoding: "utf8", timeout: 3000,
+    }).trim().split("\n");
+    if (df.length >= 2) {
+      const cols = df[1].trim().split(/\s+/);
+      metrics.disk_total     = parseInt(cols[0], 10) || null;
+      metrics.disk_available = parseInt(cols[1], 10) || null;
+      metrics.disk_used      = parseInt(cols[2], 10) || null;
+      metrics.disk_percent   = parseInt(cols[3], 10) || null;
+    }
+  } catch (_) {}
+
+  res.json(metrics);
 });
 
 app.get("/api/logs", authGate, readLimiter, (req, res) => {
