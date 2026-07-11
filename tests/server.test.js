@@ -282,8 +282,8 @@ describe("server", () => {
       mock.method(reposLib, "saveRepos", (r) => { saved.push(...r); });
       mock.method(reposLib, "terminateProcess", async () => {});
       mock.method(reposLib, "deleteCloudSession", () => ({ ok: true }));
+      mock.method(reposLib, "removeWorkDirFast", () => ({ launched: true, reason: "rename", trashPath: "/data/repos/.xyz.1.0.trash" }));
       mock.method(fs, "existsSync", () => true);
-      mock.method(fs, "rmSync", () => {});
       mock.method(fs, "unlinkSync", () => {});
       const res = await req(baseUrl, "DELETE", "/api/repos/xyz", { "Authorization": "Bearer test-server-token" });
       assert.equal(res.status, 200);

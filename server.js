@@ -605,9 +605,12 @@ app.delete("/api/repos/:workDirId", authGate, writeLimiter, async (req, res) => 
     const r = reposLib.deleteCloudSession(bucket.kilo_session_id);
     log(`delete ${logPrefix(bucket.work_dir_identifier)} cloud delete ok=${r.ok} reason=${r.reason}`);
   }
-  if (bucket.work_dir && fs.existsSync(bucket.work_dir)) {
-    try { fs.rmSync(bucket.work_dir, { recursive: true, force: true }); } catch (e) {
-      log(`delete ${logPrefix(bucket.work_dir_identifier)} work dir rm failed: ${e.message}`);
+  if (bucket.work_dir) {
+    const rm = reposLib.removeWorkDirFast(bucket.work_dir);
+    if (rm.launched) {
+      log(`delete ${logPrefix(bucket.work_dir_identifier)} work dir removal launched (${rm.reason}) -> ${rm.trashPath}`);
+    } else {
+      log(`delete ${logPrefix(bucket.work_dir_identifier)} work dir already gone (${rm.reason})`);
     }
   }
   // Also remove the per-session kilo PTY log file (orphan otherwise).

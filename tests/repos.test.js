@@ -281,4 +281,47 @@ describe("repos", () => {
       mock.restoreAll();
     });
   });
+
+  describe("removeWorkDirFast", () => {
+    async function waitForGone(p, timeoutMs = 5000) {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (!fs.existsSync(p)) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return !fs.existsSync(p);
+    }
+
+    it("renames away immediately and removes in background", async () => {
+      const workDir = fs.mkdtempSync(path.join(tmpDir, "wd-"));
+      fs.writeFileSync(path.join(workDir, "file.txt"), "data");
+      const r = repos.removeWorkDirFast(workDir);
+      assert.equal(r.launched, true);
+      assert.equal(r.reason, "rename");
+      // Original path is gone from the namespace instantly (no blocking).
+      assert.equal(fs.existsSync(workDir), false, "original dir must vanish immediately");
+      // Background `rm` eventually removes the trash path.
+      const gone = await waitForGone(r.trashPath);
+      assert.ok(gone, "background rm should remove the trash dir");
+    });
+
+    it("returns missing when work dir does not exist", () => {
+      const r = repos.removeWorkDirFast(path.join(tmpDir, "does-not-exist"));
+      assert.equal(r.launched, false);
+      assert.equal(r.reason, "missing");
+    });
+
+    it("falls back to in-place rm and never throws", async () => {
+      const workDir = fs.mkdtempSync(path.join(tmpDir, "wd2-"));
+      // Force rename to fail by making the trash target collide-prone:
+      // simulate by mocking renameSync to throw, then ensure spawn path runs.
+      mock.method(fs, "renameSync", () => { throw new Error("EXDEV"); });
+      const r = repos.removeWorkDirFast(workDir);
+      assert.equal(r.launched, true);
+      assert.equal(r.reason, "inplace");
+      mock.restoreAll();
+      const gone = await waitForGone(workDir);
+      assert.ok(gone, "in-place rm should remove the dir");
+    });
+  });
 });
