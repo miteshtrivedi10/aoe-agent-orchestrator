@@ -106,7 +106,8 @@ describe("kilo", () => {
         readMock.mock.restore();
       }
 
-      // kilo.jsonc must exist as a file with the resolved config.
+      // kilo.jsonc must exist as a file containing the template config
+      // (placeholders only — Kilo resolves {env:VAR} at runtime).
       const cfgPath = path.join(kiloDir, "kilo.jsonc");
       assert.ok(fs.existsSync(cfgPath), "kilo.jsonc must be written");
       const st = fs.statSync(cfgPath);
