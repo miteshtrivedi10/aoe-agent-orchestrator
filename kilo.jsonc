@@ -5,6 +5,9 @@
   "instructions": [
     ".kilo/rules/*.md"
   ],
+  "plugin": [
+    "context-mode"
+  ],
   "compaction": {
     "auto": true,
     "prune": true,

@@ -38,6 +38,31 @@ RUN mkdir -p /tmp/sp /app/superpowers \
     && cp -r /tmp/sp/skills/. /app/superpowers/ \
     && rm -rf /tmp/sp
 
+# Download additional always-available skills/plugins at build time so every
+# spawned Kilo session gets them without per-session network fetches:
+#   - multica-ai/andrej-karpathy-skills  -> karpathy-guidelines skill (accuracy)
+#   - JuliusBrussee/caveman              -> caveman skill (terse output, -tokens)
+#   - mksglu/context-mode                -> skill + Kilo plugin (context sandbox)
+# Only each repo's skills/ tree is copied under /app/extra-skills/<name>/skills;
+# lib/kilo.js merges them into <workDir>/.kilo/skills at spawn time. context-mode
+# itself is registered as a Kilo plugin in kilo.jsonc (auto-installed at startup).
+RUN mkdir -p /app/extra-skills \
+    && for spec in \
+         "karpathy:multica-ai/andrej-karpathy-skills" \
+         "caveman:JuliusBrussee/caveman" \
+         "context-mode:mksglu/context-mode"; do \
+       name="$${spec%%:*}"; \
+       repo="$${spec##*:}"; \
+       tmp="/tmp/$$name"; \
+       mkdir -p "/app/extra-skills/$$name/skills" "$$tmp"; \
+       curl -fsSL "https://github.com/$$repo/archive/refs/heads/main.tar.gz" \
+         | tar xz -C "$$tmp" --strip-components=1; \
+       if [ -d "$$tmp/skills" ]; then \
+         cp -r "$$tmp/skills/." "/app/extra-skills/$$name/skills/"; \
+       fi; \
+       rm -rf "$$tmp"; \
+    done
+
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -67,6 +92,7 @@ COPY entrypoint.sh /app/entrypoint.sh
 COPY kilo.jsonc /app/kilo.jsonc
 COPY rules/ /app/rules/
 COPY --from=builder /app/superpowers /app/superpowers
+COPY --from=builder /app/extra-skills /app/extra-skills
 COPY scripts/install-runtimes.sh /app/scripts/install-runtimes.sh
 
 RUN chmod +x /app/entrypoint.sh /app/scripts/install-runtimes.sh

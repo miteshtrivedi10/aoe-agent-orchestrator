@@ -8,6 +8,8 @@ The key value: sessions started through Agent Dock are not locked to the server.
 
 Agent Dock is provider-agnostic at the config level. It ships with Kilo as the default backend but supports OpenRouter, OpenCode, Gemini, and custom providers. MCP servers (Context7, GitHub, etc.) can be added by dropping a config block into `kilo.jsonc`. Rules, model preferences, and tool permissions are all configurable without code changes.
 
+Every spawned session also ships with baked-in skills and plugins for token efficiency and accuracy: `karpathy-guidelines` (think-before-coding principles), `caveman` (terse output), and `context-mode` (tool-output sandboxing via `ctx_*` tools). They are auto-discovered per session; see `rules/skills-and-plugins.md` for the mandatory usage rules.
+
 ## How to get started
 
 ```bash
