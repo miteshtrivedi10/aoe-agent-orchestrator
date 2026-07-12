@@ -266,6 +266,25 @@ function calcCpuPercent(prev, cur) {
   return Math.round(((totalDelta - idleDelta) / totalDelta) * 100 * 10) / 10;
 }
 
+function cpuCores() {
+  // Container-aware core count. os.cpus() reports host cores; cgroup limits
+  // tell us how many CPUs we are actually allowed to use.
+  try {
+    // cgroup v2: "max 100000" or "200000 100000"
+    const v2 = fs.readFileSync("/sys/fs/cgroup/cpu.max", "utf8").trim().split(/\s+/);
+    const quota = v2[0] === "max" ? -1 : parseInt(v2[0], 10);
+    const period = parseInt(v2[1] || "100000", 10);
+    if (quota > 0 && period > 0) return Math.ceil(quota / period);
+  } catch (_) {}
+  try {
+    // cgroup v1
+    const quota = parseInt(fs.readFileSync("/sys/fs/cgroup/cpu/cpu.cfs_quota_us", "utf8").trim(), 10);
+    const period = parseInt(fs.readFileSync("/sys/fs/cgroup/cpu/cpu.cfs_period_us", "utf8").trim(), 10);
+    if (quota > 0 && period > 0) return Math.ceil(quota / period);
+  } catch (_) {}
+  return os.cpus().length;
+}
+
 async function cpuPercent() {
   const first = readProcStat();
   if (!first) return 0;
@@ -300,7 +319,7 @@ app.get("/api/metrics", authGate, readLimiter, async (_req, res) => {
 
   // CPU
   metrics.cpu_percent = await cpuPercent();
-  metrics.cpu_cores = os.cpus().length;
+  metrics.cpu_cores = cpuCores();
 
   // Load
   try {

@@ -579,6 +579,7 @@ describe("server", () => {
       });
       assert.equal(res.status, 200);
       assert.equal(res.body.cpu_percent, 60);
+      // No cgroup files mocked, so falls back to os.cpus().length.
       assert.equal(res.body.cpu_cores, require("os").cpus().length);
       assert.equal(res.body.load_1m, 0.5);
       assert.equal(res.body.mem_total, 8000000 * 1024);
@@ -592,6 +593,30 @@ describe("server", () => {
       assert.equal(res.body.disk_used, 300000000);
       assert.equal(res.body.disk_percent, 30);
       assert.ok(typeof res.body.timestamp === "number");
+    });
+
+    it("reports cgroup-limited cores when cpu.max is present", async () => {
+      let statCalls = 0;
+      fs.readFileSync.mock.mockImplementation((fp, ...args) => {
+        const p = String(fp);
+        if (p === "/sys/fs/cgroup/cpu.max") return "200000 100000\n";
+        if (p === "/proc/stat") {
+          statCalls++;
+          return statCalls === 1
+            ? "cpu  100 0 50 300 10 0 0 0 0 0\n"
+            : "cpu  200 0 100 400 10 0 0 0 0 0\n";
+        }
+        if (p === "/proc/meminfo") return "MemTotal: 8000000 kB\nMemAvailable: 8000000 kB\n";
+        if (p === "/proc/loadavg") return "0.50 0.60 0.70 1/100 12345\n";
+        if (p === "/proc/uptime") return "12345.67 0\n";
+        throw new Error("ENOENT");
+      });
+
+      const res = await req(baseUrl, "GET", "/api/metrics", {
+        "Authorization": "Bearer test-server-token",
+      });
+      assert.equal(res.status, 200);
+      assert.equal(res.body.cpu_cores, 2);
     });
   });
 
