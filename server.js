@@ -254,19 +254,33 @@ function readProcStat() {
   return null;
 }
 
-function cpuPercent() {
-  const cur = readProcStat();
-  if (!cur) return 0;
-  if (!prevCpu) { prevCpu = cur; return 0; }
-  const prevIdle = prevCpu[3] + (prevCpu[4] || 0);
+function calcCpuPercent(prev, cur) {
+  if (!prev || !cur) return 0;
+  const prevIdle = prev[3] + (prev[4] || 0);
   const curIdle = cur[3] + (cur[4] || 0);
-  const prevTotal = prevCpu.reduce((a, b) => a + b, 0);
+  const prevTotal = prev.reduce((a, b) => a + b, 0);
   const curTotal = cur.reduce((a, b) => a + b, 0);
   const totalDelta = curTotal - prevTotal;
   const idleDelta = curIdle - prevIdle;
-  prevCpu = cur;
   if (totalDelta <= 0) return 0;
   return Math.round(((totalDelta - idleDelta) / totalDelta) * 100 * 10) / 10;
+}
+
+async function cpuPercent() {
+  const first = readProcStat();
+  if (!first) return 0;
+  if (!prevCpu) {
+    // First request: sample twice with a short delay so the very first
+    // read returns a real number instead of always 0%.
+    await new Promise((r) => setTimeout(r, 500));
+    const second = readProcStat();
+    prevCpu = second;
+    return calcCpuPercent(first, second);
+  }
+  const cur = readProcStat();
+  const pct = calcCpuPercent(prevCpu, cur);
+  prevCpu = cur;
+  return pct;
 }
 
 function readProcMeminfo() {
@@ -285,7 +299,7 @@ app.get("/api/metrics", authGate, readLimiter, async (_req, res) => {
   const metrics = { timestamp: Date.now() };
 
   // CPU
-  metrics.cpu_percent = cpuPercent();
+  metrics.cpu_percent = await cpuPercent();
   metrics.cpu_cores = os.cpus().length;
 
   // Load

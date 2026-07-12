@@ -268,6 +268,67 @@ body {
   gap: 1rem;
 }
 
+/* Metrics grid */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.metric-card {
+  background: var(--surface-raised);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.metric-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.metric-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.metric-sub {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.metric-bar {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 0.25rem;
+}
+
+.metric-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--success);
+  min-width: 0;
+  transition: width 0.3s ease;
+}
+
+.metric-bar > span.warn { background: var(--warning); }
+.metric-bar > span.danger { background: var(--danger); }
+
+.metric-footer {
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 /* Form elements */
 .form-row {
   display: flex;
@@ -585,7 +646,7 @@ tr.row-error {
       <span class="nav-icon">◈</span> Diagnostics
     </button>
     <button type="button" class="nav-item" data-target="metrics" onclick="navigateTo('metrics')">
-      <span class="nav-icon">📊</span> Metrics
+      <span class="nav-icon">◧</span> Metrics
     </button>
     <button type="button" class="nav-item" data-target="logs" onclick="navigateTo('logs')">
       <span class="nav-icon">≡</span> Logs
@@ -1239,52 +1300,49 @@ function fmtUptime(s) {
 }
 
 async function loadMetrics() {
+  function bar(pct) {
+    const cls = pct > 90 ? 'danger' : pct > 75 ? 'warn' : '';
+    return '<div class="metric-bar"><span class="' + cls + '" style="width:' + Math.min(100, Math.max(0, pct || 0)) + '%"></span></div>';
+  }
+  function card(label, value, sub, pct) {
+    return '<div class="metric-card">' +
+      '<div class="metric-label">' + esc(label) + '</div>' +
+      '<div class="metric-value">' + esc(String(value)) + '</div>' +
+      (sub ? '<div class="metric-sub">' + esc(sub) + '</div>' : '') +
+      (pct != null ? bar(pct) : '') +
+      '</div>';
+  }
+
   try {
     const res = await fetch('/api/metrics', { headers: authHeaders() });
     const d = await res.json();
-    let html = '<table style="width:100%"><tbody>';
 
-    // CPU
-    html += '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0;font-weight:600">CPU</td><td style="padding:0.2rem 0"></td></tr>';
-    html += row('cpu_percent', (d.cpu_percent != null ? d.cpu_percent + '%' : '—') + ' (' + (d.cpu_cores || '?') + ' cores)');
-    html += row('load_1m / 5m / 15m', d.load_1m != null ? d.load_1m + ' / ' + d.load_5m + ' / ' + d.load_15m : '—');
+    let html = '<div class="metric-grid">';
 
-    // Memory
-    html += '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0;font-weight:600">Memory</td><td style="padding:0.2rem 0"></td></tr>';
-    html += row('mem_total', fmtBytes(d.mem_total));
-    html += row('mem_used / percent', fmtBytes(d.mem_used) + ' / ' + (d.mem_percent != null ? d.mem_percent + '%' : '—'));
-    html += row('mem_available', fmtBytes(d.mem_available));
-    html += row('swap', fmtBytes(d.swap_total) + ' total / ' + fmtBytes(d.swap_free) + ' free');
+    html += card('CPU Usage',
+      d.cpu_percent != null ? d.cpu_percent + '%' : '—',
+      (d.cpu_cores || '?') + ' cores · load ' + [d.load_1m, d.load_5m, d.load_15m].map(function(x) { return x != null ? x : '—'; }).join(' / '),
+      d.cpu_percent);
 
-    // Disk
-    html += '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0;font-weight:600">Disk (/data)</td><td style="padding:0.2rem 0"></td></tr>';
-    html += row('disk_total', fmtBytes(d.disk_total));
-    html += row('disk_used / percent', fmtBytes(d.disk_used) + ' / ' + (d.disk_percent != null ? d.disk_percent + '%' : '—'));
-    html += row('disk_available', fmtBytes(d.disk_available));
+    html += card('Memory',
+      d.mem_percent != null ? d.mem_percent + '%' : '—',
+      fmtBytes(d.mem_used) + ' used / ' + fmtBytes(d.mem_total) + ' total',
+      d.mem_percent);
 
-    // System
-    html += '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0;font-weight:600">System</td><td style="padding:0.2rem 0"></td></tr>';
-    html += row('uptime', fmtUptime(d.uptime_seconds));
+    html += card('Disk (/data)',
+      d.disk_percent != null ? d.disk_percent + '%' : '—',
+      fmtBytes(d.disk_used) + ' used / ' + fmtBytes(d.disk_total) + ' total',
+      d.disk_percent);
 
-    // Color-code disk percent
-    if (d.disk_percent != null) {
-      const color = d.disk_percent > 90 ? 'color:#ef4444;font-weight:600' : d.disk_percent > 75 ? 'color:#f59e0b' : '';
-      html += row('disk_percent', '<span style="' + color + '">' + d.disk_percent + '%</span>');
-    }
-    if (d.mem_percent != null) {
-      const color = d.mem_percent > 90 ? 'color:#ef4444;font-weight:600' : d.mem_percent > 75 ? 'color:#f59e0b' : '';
-      html += row('mem_percent', '<span style="' + color + '">' + d.mem_percent + '%</span>');
-    }
+    html += card('Uptime',
+      fmtUptime(d.uptime_seconds),
+      d.uptime_seconds != null ? Math.round(d.uptime_seconds) + ' seconds' : '');
 
-    html += '</tbody></table>';
-    html += '<p style="color:var(--text-muted);font-size:0.75rem;margin-top:0.5rem">Last updated: ' + new Date(d.timestamp).toLocaleTimeString() + '</p>';
+    html += '</div>';
+    html += '<div class="metric-footer">Last updated: ' + new Date(d.timestamp).toLocaleTimeString() + '</div>';
     document.getElementById('metricsPanel').innerHTML = html;
   } catch(e) {
     document.getElementById('metricsPanel').innerHTML = '<div class="empty">Error loading metrics: ' + esc(e.message) + '</div>';
-  }
-
-  function row(k, v) {
-    return '<tr><td style="color:#94a3b8;padding:0.2rem 0.5rem 0.2rem 0">' + k + '</td><td style="padding:0.2rem 0">' + esc(String(v)) + '</td></tr>';
   }
 }
 

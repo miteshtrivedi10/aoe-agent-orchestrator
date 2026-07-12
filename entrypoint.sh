@@ -56,6 +56,11 @@ else
   echo "=== No HF_SECRETS found — secrets must be set as individual env vars ==="
 fi
 
+# Permanent snapshot disable for every kilo process in the container.
+# KILO_CONFIG_CONTENT is merged LAST by kilo's config loader and overrides
+# all config files (global + project) and most organization config.
+export KILO_CONFIG_CONTENT='{"snapshot":false}'
+
 # Kilo data dirs
 mkdir -p /root/.config /root/.local/share
 rm -rf /root/.config/kilo /root/.local/share/kilo

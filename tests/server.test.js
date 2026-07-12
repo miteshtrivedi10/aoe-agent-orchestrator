@@ -549,6 +549,52 @@ describe("server", () => {
     });
   });
 
+  describe("GET /api/metrics", () => {
+    it("returns live system metrics with a real CPU sample", async () => {
+      const cp = require("child_process");
+      let statCalls = 0;
+      fs.readFileSync.mock.mockImplementation((fp, ...args) => {
+        const p = String(fp);
+        if (p === "/proc/stat") {
+          statCalls++;
+          return statCalls === 1
+            ? "cpu  100 0 50 300 10 0 0 0 0 0\n"
+            : "cpu  200 0 100 400 10 0 0 0 0 0\n";
+        }
+        if (p === "/proc/meminfo") {
+          return "MemTotal: 8000000 kB\nMemAvailable: 2000000 kB\nSwapTotal: 1000000 kB\nSwapFree: 800000 kB\n";
+        }
+        if (p === "/proc/loadavg") return "0.50 0.60 0.70 1/100 12345\n";
+        if (p === "/proc/uptime") return "12345.67 0\n";
+        throw new Error("ENOENT");
+      });
+      // Return sensible df output just for this test.
+      cp.execFileSync.mock.mockImplementation((cmd, args, opts) => {
+        if (cmd === "df") return "      size      avail       used  pcent\n 1000000000   700000000   300000000    30%\n";
+        return "7.3.54";
+      });
+
+      const res = await req(baseUrl, "GET", "/api/metrics", {
+        "Authorization": "Bearer test-server-token",
+      });
+      assert.equal(res.status, 200);
+      assert.equal(res.body.cpu_percent, 60);
+      assert.equal(res.body.cpu_cores, require("os").cpus().length);
+      assert.equal(res.body.load_1m, 0.5);
+      assert.equal(res.body.mem_total, 8000000 * 1024);
+      assert.equal(res.body.mem_available, 2000000 * 1024);
+      assert.equal(res.body.mem_used, 6000000 * 1024);
+      assert.equal(res.body.mem_percent, 75);
+      assert.equal(res.body.swap_total, 1000000 * 1024);
+      assert.equal(res.body.swap_free, 800000 * 1024);
+      assert.equal(res.body.uptime_seconds, 12345.67);
+      assert.equal(res.body.disk_total, 1000000000);
+      assert.equal(res.body.disk_used, 300000000);
+      assert.equal(res.body.disk_percent, 30);
+      assert.ok(typeof res.body.timestamp === "number");
+    });
+  });
+
   describe("Removed legacy endpoints", () => {
     it("/api/spin-up returns 404", async () => {
       const res = await req(baseUrl, "POST", "/api/spin-up", {
