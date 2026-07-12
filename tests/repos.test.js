@@ -282,6 +282,105 @@ describe("repos", () => {
     });
   });
 
+  describe("softDeleteWorkDir", () => {
+    it("renames work dir to a .trash path and leaves it on disk", () => {
+      const workDir = fs.mkdtempSync(path.join(tmpDir, "wd-"));
+      fs.writeFileSync(path.join(workDir, "file.txt"), "data");
+      const r = repos.softDeleteWorkDir(workDir);
+      assert.equal(r.renamed, true);
+      assert.ok(r.trashPath);
+      assert.ok(r.trashPath.endsWith(".trash"));
+      assert.equal(fs.existsSync(workDir), false, "original path must vanish immediately");
+      assert.equal(fs.existsSync(r.trashPath), true, "trash path must exist");
+      assert.ok(fs.existsSync(path.join(r.trashPath, "file.txt")));
+    });
+
+    it("returns missing when work dir does not exist", () => {
+      const r = repos.softDeleteWorkDir(path.join(tmpDir, "does-not-exist"));
+      assert.equal(r.renamed, false);
+      assert.equal(r.reason, "missing");
+    });
+  });
+
+  describe("runTrashCleanup", () => {
+    it("deletes .trash dirs and orphan work dirs not in repos.json", () => {
+      const reposDir = fs.mkdtempSync(path.join(tmpDir, "repos-"));
+      const logsDir = fs.mkdtempSync(path.join(tmpDir, "logs-"));
+      const reposFile = path.join(tmpDir, "repos.json");
+
+      // Allowed dir referenced by repos.json.
+      const allowedDir = path.join(reposDir, "allowed");
+      fs.mkdirSync(allowedDir, { recursive: true });
+      fs.writeFileSync(path.join(allowedDir, "keep.txt"), "keep");
+
+      // Orphan work dir and a .trash dir should both be removed.
+      const orphanDir = path.join(reposDir, "orphan");
+      fs.mkdirSync(orphanDir, { recursive: true });
+      fs.writeFileSync(path.join(orphanDir, "a.txt"), "a");
+      fs.writeFileSync(path.join(orphanDir, "b.txt"), "b");
+
+      const trashDir = path.join(reposDir, ".orphan.1752355200000.trash");
+      fs.mkdirSync(trashDir, { recursive: true });
+      fs.writeFileSync(path.join(trashDir, "c.txt"), "c");
+
+      fs.writeFileSync(reposFile, JSON.stringify([{ work_dir_identifier: "allowed", work_dir: allowedDir }]));
+
+      repos.runTrashCleanup(reposDir, reposFile, logsDir);
+
+      assert.equal(fs.existsSync(orphanDir), false, "orphan dir must be removed");
+      assert.equal(fs.existsSync(trashDir), false, "trash dir must be removed");
+      assert.equal(fs.existsSync(allowedDir), true, "allowed dir must be kept");
+
+      const reportFiles = fs.readdirSync(logsDir).filter((f) => f.endsWith(".log"));
+      assert.equal(reportFiles.length, 1, "one deletion report log must be written");
+      const report = JSON.parse(fs.readFileSync(path.join(logsDir, reportFiles[0]), "utf8"));
+      assert.equal(report.deleted.length, 2);
+      const names = report.deleted.map((d) => d.repo_name).sort();
+      assert.deepEqual(names, ["orphan", "orphan"]);
+      const files = report.deleted.map((d) => d.files).sort((a, b) => a - b);
+      assert.deepEqual(files, [1, 2]);
+      assert.ok(report.deleted.every((d) => d.deleted_at && d.deleted_at.endsWith("IST")));
+    });
+
+    it("keeps all dirs when every dir is referenced by repos.json", () => {
+      const reposDir = fs.mkdtempSync(path.join(tmpDir, "repos-"));
+      const logsDir = fs.mkdtempSync(path.join(tmpDir, "logs-"));
+      const reposFile = path.join(tmpDir, "repos.json");
+
+      const dir = path.join(reposDir, "repo-a");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "x.txt"), "x");
+      fs.writeFileSync(reposFile, JSON.stringify([{ work_dir_identifier: "repo-a", work_dir: dir }]));
+
+      repos.runTrashCleanup(reposDir, reposFile, logsDir);
+
+      assert.equal(fs.existsSync(dir), true);
+      const reportFiles = fs.readdirSync(logsDir).filter((f) => f.endsWith(".log"));
+      assert.equal(reportFiles.length, 1);
+      const report = JSON.parse(fs.readFileSync(path.join(logsDir, reportFiles[0]), "utf8"));
+      assert.equal(report.deleted.length, 0);
+    });
+  });
+
+  describe("next3AM_IST", () => {
+    it("returns a future 03:00 IST timestamp", () => {
+      const next = repos.next3AM_IST();
+      const now = new Date();
+      assert.ok(next.getTime() > now.getTime(), "next 3AM must be in the future");
+      const fmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      const parts = Object.fromEntries(fmt.formatToParts(next).map((x) => [x.type, x.value]));
+      assert.equal(parts.hour, "03");
+      assert.equal(parts.minute, "00");
+      assert.equal(parts.second, "00");
+    });
+  });
+
   describe("removeWorkDirFast", () => {
     async function waitForGone(p, timeoutMs = 5000) {
       const deadline = Date.now() + timeoutMs;

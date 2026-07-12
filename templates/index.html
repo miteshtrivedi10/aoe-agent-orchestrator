@@ -1053,7 +1053,7 @@ async function killRepo(workDirId) {
 
 async function deleteRepo(workDirId) {
   if (busyRows.has(workDirId)) return;
-  if (!confirm('DELETE this bucket? This stops the session, removes the work directory from disk, and removes the entry from the registry. The repo can be re-checked out fresh afterwards. UNCOMMITTED FILE CHANGES WILL BE LOST.')) return;
+  if (!confirm('DELETE this bucket? This stops the session, moves the work directory to .trash, and removes the entry from the registry. The directory is permanently deleted by the daily 03:00 IST cleanup job. The repo can be re-checked out fresh afterwards. UNCOMMITTED FILE CHANGES WILL BE LOST.')) return;
   setRowBusy(workDirId, 'delete');
   try {
     const res = await fetch('/api/repos/' + encodeURIComponent(workDirId), { method: 'DELETE', headers: authHeaders() });
@@ -1288,12 +1288,31 @@ async function loadMetrics() {
   }
 }
 
+function fmtIST(ts) {
+  // ts is a server UTC timestamp like "2026-07-12 03:00:00".
+  const d = new Date(ts + 'Z');
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).replace(/,/g, '') + ' IST';
+}
+
 async function loadLogs() {
   try {
     const res = await fetch('/api/logs?n=100', { headers: authHeaders() });
     const d = await res.json();
     const el = document.getElementById('logPanel');
-    el.innerHTML = d.lines.slice().reverse().map(l => esc(l)).join('\n');
+    el.innerHTML = d.lines.slice().reverse().map(function(l) {
+      const m = l.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(.*)/);
+      if (m) {
+        const ist = fmtIST(m[1]);
+        if (ist) return esc(ist + m[2]);
+      }
+      return esc(l);
+    }).join('\n');
     if (!el._userScrolled) {
       el.scrollTop = 0;
     }

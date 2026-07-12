@@ -700,11 +700,11 @@ app.delete("/api/repos/:workDirId", authGate, writeLimiter, async (req, res) => 
     log(`delete ${logPrefix(bucket.work_dir_identifier)} cloud delete ok=${r.ok} reason=${r.reason}`);
   }
   if (bucket.work_dir) {
-    const rm = reposLib.removeWorkDirFast(bucket.work_dir);
-    if (rm.launched) {
-      log(`delete ${logPrefix(bucket.work_dir_identifier)} work dir removal launched (${rm.reason}) -> ${rm.trashPath}`);
+    const rm = reposLib.softDeleteWorkDir(bucket.work_dir);
+    if (rm.renamed) {
+      log(`delete ${logPrefix(bucket.work_dir_identifier)} work dir moved to trash (${rm.reason}) -> ${rm.trashPath}`);
     } else {
-      log(`delete ${logPrefix(bucket.work_dir_identifier)} work dir already gone (${rm.reason})`);
+      log(`delete ${logPrefix(bucket.work_dir_identifier)} work dir not moved to trash (${rm.reason})`);
     }
   }
   // Also remove the per-session kilo PTY log file (orphan otherwise).
@@ -777,6 +777,7 @@ module.exports = app;
 if (require.main === module) {
   app.listen(PORT, "0.0.0.0", () => {
     log(`Server running on http://0.0.0.0:${PORT}`);
+    reposLib.scheduleTrashCleanup();
     initKiloStartup();
   });
 }

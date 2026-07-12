@@ -429,18 +429,17 @@ describe("kilo", () => {
     });
 
     it("returns true and writes when PTY registered", () => {
-      const fakePty = { write: mock.fn() };
-      kilo.LIVE_PTYS.set("test-session", fakePty);
+      const fakeWrite = mock.fn();
+      kilo.LIVE_PTYS.set("test-session", { pty: { write: fakeWrite } });
       const result = kilo.sendPromptToLive("test-session", "my prompt");
       assert.equal(result, true);
-      assert.equal(fakePty.write.mock.callCount(), 1);
-      assert.equal(fakePty.write.mock.calls[0].arguments[0], "my prompt\n");
+      assert.equal(fakeWrite.mock.callCount(), 1);
+      assert.equal(fakeWrite.mock.calls[0].arguments[0], "my prompt\n");
       kilo.LIVE_PTYS.delete("test-session");
     });
 
     it("returns false when PTY write throws", () => {
-      const fakePty = { write: () => { throw new Error("broken"); } };
-      kilo.LIVE_PTYS.set("broken-session", fakePty);
+      kilo.LIVE_PTYS.set("broken-session", { pty: { write: () => { throw new Error("broken"); } } });
       const result = kilo.sendPromptToLive("broken-session", "test");
       assert.equal(result, false);
       kilo.LIVE_PTYS.delete("broken-session");
