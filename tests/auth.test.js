@@ -11,6 +11,13 @@ function reloadAuth(envOverrides = {}) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
+  // The auth harness must be hermetic: clear ambient Kilo auth env vars
+  // unless a test explicitly sets them, otherwise inspectAuth() picks up a
+  // KILO_API_KEY exported by the surrounding shell and every "no auth"
+  // assertion fails.
+  for (const k of ["KILO_API_KEY", "KILO_AUTH_TOKEN"]) {
+    if (!(k in envOverrides)) delete process.env[k];
+  }
   // Clear require cache for auth and logger (auth imports logger)
   delete require.cache[require.resolve(authPath)];
   delete require.cache[require.resolve(path.resolve(__dirname, "../lib/logger.js"))];
@@ -180,7 +187,11 @@ describe("auth", () => {
   describe("inspectAuth", () => {
     it("returns default result when no auth.json", () => {
       const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x" });
+      // Mock the auth.json lookup so the test is hermetic and does not
+      // depend on a real /data/kilo/auth.json present on the host.
+      mock.method(fs, "statSync", () => { throw new Error("ENOENT"); });
       const result = a.inspectAuth();
+      mock.restoreAll();
       assert.equal(result.valid, false);
       assert.equal(result.reason, "no auth.json found");
       assert.equal(result.file_exists, false);
@@ -188,7 +199,9 @@ describe("auth", () => {
 
     it("returns valid when KILO_API_KEY env is set and no auth.json", () => {
       const a = reloadAuth({ AGENT_DOCK_API_TOKEN: "x", KILO_API_KEY: "sk-test" });
+      mock.method(fs, "statSync", () => { throw new Error("ENOENT"); });
       const result = a.inspectAuth();
+      mock.restoreAll();
       assert.equal(result.valid, true);
       assert.equal(result.reason, "ok (env-var KILO_API_KEY)");
       assert.equal(result.detected_type, "env-var");

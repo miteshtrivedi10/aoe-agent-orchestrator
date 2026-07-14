@@ -1102,6 +1102,9 @@ async function killRepo(workDirId) {
     if (res.ok) {
       toast('Session killed', 'success');
       setExpectedState(workDirId, 'killed');
+    } else if (res.status === 409 && data && data.auth_invalid) {
+      toast(data.error || 'Auth required — open the Auth tab and login first', 'error');
+      clearRowBusy(workDirId, true);
     } else {
       toast(data.error || 'Failed to kill', 'error');
       clearRowBusy(workDirId, true);

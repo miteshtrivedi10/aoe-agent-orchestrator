@@ -45,16 +45,16 @@ log(`boot kilo version=${KILO_VERSION} which=${KILO_WHICH || "not found"} (cache
 
 // ── Small helpers ────────────────────────────────────────────────────
 
-// Q6: Auth pre-flight check. Returns a 409-ready error body if auth is
-// invalid, otherwise null. Used by checkout / start / new-session so we
-// never spawn a kilo PTY that's destined to die at the cloud-provider
-// validation step (root cause of the original 361ce879/21:44 incident).
+// Auth pre-flight check. Returns a 409-ready error body if auth is
+// invalid, otherwise null. Used by checkout / start / new-session / kill so
+// we never act on buckets while the Agent Dock is not logged in to Kilo.
 function authPreflight() {
   const auth = inspectAuth();
   if (!auth.valid) {
     return {
-      error: `auth invalid — complete login on the Auth tab first (reason: ${auth.reason})`,
+      error: `Auth required — open the Auth tab and complete login before any checkout, start, resume, or kill (reason: ${auth.reason})`,
       auth_invalid: true,
+      hint: "Complete device login on the Auth tab, then retry the action.",
     };
   }
   return null;
@@ -701,6 +701,9 @@ app.post("/api/repos/:workDirId/kill", authGate, writeLimiter, async (req, res) 
   const repos = reposLib.updateStatus(reposLib.loadRepos());
   const bucket = reposLib.findBucket(repos, req.params.workDirId);
   if (!bucket) return res.status(404).json({ error: "repo bucket not found" });
+
+  const pre = authPreflight();
+  if (pre) return res.status(409).json(pre);
 
   await reposLib.terminateProcess(bucket.pid || 0);
   if (bucket.kilo_session_id) {

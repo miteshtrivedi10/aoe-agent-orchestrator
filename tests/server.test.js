@@ -438,7 +438,7 @@ describe("server", () => {
       }, { repo_url: "https://example.com/repo.git", branch: "main" });
       assert.equal(res.status, 409);
       assert.equal(res.body.auth_invalid, true);
-      assert.match(res.body.error, /auth invalid/);
+      assert.match(res.body.error, /Auth required/);
     });
 
     it("start returns 409 when auth invalid (no bucket)", async () => {
@@ -452,6 +452,38 @@ describe("server", () => {
       const res = await req(baseUrl, "POST", "/api/repos/xyz/start", { "Authorization": "Bearer test-server-token" });
       assert.equal(res.status, 409);
       assert.equal(res.body.auth_invalid, true);
+    });
+
+    it("kill returns 409 when auth invalid", async () => {
+      delete process.env.KILO_API_KEY;
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      const terminateSpy = mock.method(reposLib, "terminateProcess", () => Promise.resolve());
+      mock.method(reposLib, "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "running", kilo_session_id: "ses_x", work_dir: "/tmp/test" },
+      ]);
+      mock.method(reposLib, "updateStatus", (r) => r);
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/kill", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 409);
+      assert.equal(res.body.auth_invalid, true);
+      assert.match(res.body.error, /Auth required/);
+      // Must NOT terminate the process when auth is invalid.
+      assert.equal(terminateSpy.mock.callCount(), 0);
+    });
+
+    it("new-session returns 409 when auth invalid", async () => {
+      delete process.env.KILO_API_KEY;
+      const reposLib = require(path.resolve(__dirname, "../lib/repos.js"));
+      const startSpy = mock.method(require(path.resolve(__dirname, "../lib/kilo.js")), "startKiloSession", () =>
+        Promise.resolve({ pid: 1, cloudSessionId: "ses_new", started: true }));
+      mock.method(reposLib, "loadRepos", () => [
+        { work_dir_identifier: "xyz", session_state: "paused", kilo_session_id: "ses_old", work_dir: "/tmp/test" },
+      ]);
+      mock.method(reposLib, "updateStatus", (r) => r);
+      mock.method(fs, "existsSync", () => true);
+      const res = await req(baseUrl, "POST", "/api/repos/xyz/new-session", { "Authorization": "Bearer test-server-token" });
+      assert.equal(res.status, 409);
+      assert.equal(res.body.auth_invalid, true);
+      assert.equal(startSpy.mock.callCount(), 0);
     });
   });
 
