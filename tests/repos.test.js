@@ -423,4 +423,34 @@ describe("repos", () => {
       assert.ok(gone, "in-place rm should remove the dir");
     });
   });
+
+  describe("sanitizeHooks", () => {
+    function makeHooks(workDir) {
+      const hooks = path.join(workDir, ".git", "hooks");
+      fs.mkdirSync(hooks, { recursive: true });
+      return hooks;
+    }
+
+    it("removes directory/FIFO hook entries but keeps samples and real hook files", () => {
+      const workDir = fs.mkdtempSync(path.join(tmpDir, "hookwd-"));
+      const hooks = makeHooks(workDir);
+      fs.writeFileSync(path.join(hooks, "pre-commit.sample"), "# sample");
+      fs.writeFileSync(path.join(hooks, "pre-push"), "# real hook");
+      fs.mkdirSync(path.join(hooks, "pre-commit"));            // broken dir
+      fs.mkdirSync(path.join(hooks, "pre-commit", "repos"));  // broken subdir
+      fs.mkdirSync(path.join(hooks, "prepare-commit-msg"));   // broken dir
+
+      repos.sanitizeHooks(workDir);
+
+      const kept = fs.readdirSync(hooks).sort();
+      assert.deepEqual(kept, ["pre-commit.sample", "pre-push"]);
+      assert.equal(fs.existsSync(path.join(hooks, "pre-commit")), false);
+      assert.equal(fs.existsSync(path.join(hooks, "prepare-commit-msg")), false);
+    });
+
+    it("does not throw when .git/hooks is absent", () => {
+      const workDir = fs.mkdtempSync(path.join(tmpDir, "nogit-"));
+      assert.doesNotThrow(() => repos.sanitizeHooks(workDir));
+    });
+  });
 });
